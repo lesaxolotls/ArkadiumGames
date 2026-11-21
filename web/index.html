@@ -60,7 +60,9 @@ function readGamepad(){
   padConnected=true;
   const axis=(n)=>{const v=pad.axes[n]||0;return Math.abs(v)<.16?0:v;};
   const pressed=(n)=>!!pad.buttons[n]?.pressed;
-  padMoveX=axis(0);padMoveY=axis(1);padLookX=axis(2);padLookY=axis(3);
+  /* Sur Xbox Edge, certains profils exposent les sticks dans l'ordre inverse. */
+   if(pad.mapping==='standard'){padMoveX=axis(0);padMoveY=axis(1);padLookX=axis(2);padLookY=axis(3);}
+   else{padLookX=axis(0);padLookY=axis(1);padMoveX=axis(2);padMoveY=axis(3);}
   padJump=pressed(0);padSprint=pressed(10);
   if(pressed(1)&&!previousPadButtons[1])cameraMode=1-cameraMode; // B
   if(pressed(9)&&!previousPadButtons[9]&&document.pointerLockElement)document.exitPointerLock?.(); // Menu
