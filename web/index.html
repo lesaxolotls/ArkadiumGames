@@ -26,12 +26,16 @@ button{background:#a83232;color:white;border:0;border-radius:6px;padding:10px 13
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js';
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x87b9d8);scene.fog=new THREE.Fog(0x87b9d8,45,180);
 const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,500);
-const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;document.body.appendChild(renderer.domElement);
+const renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance'});renderer.setPixelRatio(1);renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=false;document.body.appendChild(renderer.domElement);
 scene.add(new THREE.HemisphereLight(0xddeeff,0x536344,2));const sun=new THREE.DirectionalLight(0xffffff,2.2);sun.position.set(30,60,20);sun.castShadow=true;scene.add(sun);
 const ground=new THREE.Mesh(new THREE.PlaneGeometry(500,500),new THREE.MeshStandardMaterial({color:0x477b43}));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
 const grid=new THREE.GridHelper(500,100,0x315d32,0x527c4a);grid.position.y=.02;scene.add(grid);
 const trunkMat=new THREE.MeshStandardMaterial({color:0x765238}),leafMat=new THREE.MeshStandardMaterial({color:0x28633b});
-for(let i=0;i<90;i++){const x=(Math.random()-.5)*220,z=(Math.random()-.5)*220;if(Math.hypot(x,z)<9)continue;const tr=new THREE.Mesh(new THREE.CylinderGeometry(.22,.32,2,7),trunkMat);tr.position.set(x,1,z);tr.castShadow=true;scene.add(tr);const cr=new THREE.Mesh(new THREE.ConeGeometry(1.5,4,8),leafMat);cr.position.set(x,3.8,z);cr.castShadow=true;scene.add(cr);}
+// Arbres instanciés : deux appels de rendu au lieu de près de 180, pour de meilleures performances sur Xbox.
+const treePositions=[];for(let i=0;i<90;i++){const x=(Math.random()-.5)*220,z=(Math.random()-.5)*220;if(Math.hypot(x,z)>=9)treePositions.push([x,z]);}
+const treeDummy=new THREE.Object3D();const trunks=new THREE.InstancedMesh(new THREE.CylinderGeometry(.22,.32,2,6),trunkMat,treePositions.length);const crowns=new THREE.InstancedMesh(new THREE.ConeGeometry(1.5,4,7),leafMat,treePositions.length);
+for(let i=0;i<treePositions.length;i++){const [x,z]=treePositions[i];treeDummy.position.set(x,1,z);treeDummy.updateMatrix();trunks.setMatrixAt(i,treeDummy.matrix);treeDummy.position.set(x,3.8,z);treeDummy.updateMatrix();crowns.setMatrixAt(i,treeDummy.matrix);}
+trunks.instanceMatrix.needsUpdate=true;crowns.instanceMatrix.needsUpdate=true;scene.add(trunks,crowns);
 const bodyGeo=new THREE.CapsuleGeometry(.42,.9,4,8),remote=new Map(),local={x:0,y:0,z:0,vy:0,onGround:true,yaw:0};
 const localMesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:0x3b82f6}));localMesh.position.y=1;scene.add(localMesh);
 let myId=null,ws=null,yaw=0,pitch=-.18,cameraMode=0,locked=false,lastSend=0;const keys={};let previousPadButtons=[];let padConnected=false;let padMoveX=0,padMoveY=0,padLookX=0,padLookY=0,padJump=false,padSprint=false;
