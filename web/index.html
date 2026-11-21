@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ARKADIUM 3D</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101820;color:#fff;font-family:Arial,sans-serif}canvas{display:block}
+#hud{position:fixed;inset:0;pointer-events:none}.panel{background:#101820dc;border:1px solid #a83232;border-radius:10px;padding:12px;backdrop-filter:blur(8px)}
+#brand{position:absolute;top:16px;left:16px;font-weight:900;font-size:22px;color:#ff5555;text-shadow:0 2px 8px #000}
+#stats{position:absolute;top:16px;right:16px;text-align:right}#help{position:absolute;left:16px;bottom:16px;font-size:13px;line-height:1.6}
+#chat{position:absolute;right:16px;bottom:16px;width:min(340px,calc(100vw - 32px));pointer-events:auto}#messages{height:140px;overflow:auto;font-size:13px;line-height:1.4;margin-bottom:8px;overflow-wrap:anywhere}
+#chatrow{display:flex;gap:6px}input{min-width:0;flex:1;background:#18232d;color:white;border:1px solid #59636d;border-radius:6px;padding:10px}
+button{background:#a83232;color:white;border:0;border-radius:6px;padding:10px 13px;cursor:pointer;font-weight:bold}
+#start{position:absolute;inset:0;display:grid;place-items:center;background:#071018c9;pointer-events:auto}#start .panel{text-align:center;max-width:420px;margin:20px}#start p{line-height:1.5;color:#d5dbe0}
+#crosshair{position:absolute;left:50%;top:50%;width:5px;height:5px;border-radius:50%;background:white;box-shadow:0 0 3px #000}
+@media(max-width:600px){#help{display:none}#stats{font-size:12px}#messages{height:90px}}
+</style></head>
+<body>
+<div id="hud">
+<div id="brand">⚔ ARKADIUM 3D</div><div id="stats" class="panel"><div id="connection">Connexion…</div><div id="count">0 / 50 joueurs</div></div>
+<div id="help" class="panel">ZQSD / WASD : bouger<br>Espace : sauter · Maj : courir<br>V : changer de caméra<br>Échap : libérer la souris<br>Entrée : discuter</div><div id="crosshair"></div>
+<div id="chat" class="panel"><div id="messages"></div><form id="chatrow"><input id="chatinput" maxlength="240" placeholder="Écrire un message…"><button>Envoyer</button></form></div>
+<div id="start"><div class="panel"><h1>⚔ ARKADIUM 3D</h1><p>Explore le monde et retrouve les autres joueurs.</p><p>Choisis ton nom puis clique pour jouer.</p><input id="playername" maxlength="16" value="Joueur" aria-label="Ton nom"><p><button id="play">JOUER</button></p><small>Prototype multijoueur en développement</small></div></div>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js';
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x87b9d8);scene.fog=new THREE.Fog(0x87b9d8,45,180);
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,500);
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;document.body.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xddeeff,0x536344,2));const sun=new THREE.DirectionalLight(0xffffff,2.2);sun.position.set(30,60,20);sun.castShadow=true;scene.add(sun);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(500,500),new THREE.MeshStandardMaterial({color:0x477b43}));ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+const grid=new THREE.GridHelper(500,100,0x315d32,0x527c4a);grid.position.y=.02;scene.add(grid);
+const trunkMat=new THREE.MeshStandardMaterial({color:0x765238}),leafMat=new THREE.MeshStandardMaterial({color:0x28633b});
+for(let i=0;i<90;i++){const x=(Math.random()-.5)*220,z=(Math.random()-.5)*220;if(Math.hypot(x,z)<9)continue;const tr=new THREE.Mesh(new THREE.CylinderGeometry(.22,.32,2,7),trunkMat);tr.position.set(x,1,z);tr.castShadow=true;scene.add(tr);const cr=new THREE.Mesh(new THREE.ConeGeometry(1.5,4,8),leafMat);cr.position.set(x,3.8,z);cr.castShadow=true;scene.add(cr);}
+const bodyGeo=new THREE.CapsuleGeometry(.42,.9,4,8),remote=new Map(),local={x:0,y:0,z:0,vy:0,onGround:true,yaw:0};
+const localMesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:0x3b82f6}));localMesh.position.y=1;scene.add(localMesh);
+let myId=null,ws=null,yaw=0,pitch=-.18,cameraMode=0,locked=false,lastSend=0;const keys={};
+function makePlayer(p){const mesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:p.color||0xff5555}));mesh.position.set(p.x||0,1,p.z||0);scene.add(mesh);const label=document.createElement('div');label.style.cssText='position:fixed;color:white;font-size:12px;text-shadow:0 1px 4px black;pointer-events:none;transform:translate(-50%,-50%)';label.textContent=p.name||'Joueur';document.body.appendChild(label);return{mesh,label,name:p.name||'Joueur'};}
+function say(s){const e=document.createElement('div');e.textContent=s;const box=document.querySelector('#messages');box.append(e);box.scrollTop=box.scrollHeight;}
+function count(){document.querySelector('#count').textContent=(remote.size+(myId?1:0))+' / '+(ws?.maxPlayers||50)+' joueurs';}
+function connect(){const scheme=location.protocol==='https:'?'wss':'ws';ws=new WebSocket(scheme+'://'+location.host+'/ws');ws.onopen=()=>document.querySelector('#connection').textContent='Connecté';ws.onclose=()=>document.querySelector('#connection').textContent='Déconnecté';ws.onerror=()=>document.querySelector('#connection').textContent='Erreur réseau';
+ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='welcome'){myId=d.id;ws.maxPlayers=d.max_players;for(const p of d.players)if(p.id!==myId)remote.set(p.id,makePlayer(p));ws.send(JSON.stringify({type:'name',name:document.querySelector('#playername').value}));count();}
+else if(d.type==='join'){if(!remote.has(d.player.id))remote.set(d.player.id,makePlayer(d.player));count();}
+else if(d.type==='leave'){const p=remote.get(d.id);if(p){scene.remove(p.mesh);p.label.remove();remote.delete(d.id);}count();}
+else if(d.type==='move'){const p=remote.get(d.player.id);if(p){p.mesh.position.set(d.player.x,d.player.y+1,d.player.z);p.mesh.rotation.y=d.player.yaw;}}
+else if(d.type==='rename'){const p=remote.get(d.id);if(p){p.name=d.name;p.label.textContent=d.name;}}
+else if(d.type==='chat')say(d.name+': '+d.message);else if(d.type==='error')say(d.message);};}
+document.querySelector('#play').onclick=()=>{document.querySelector('#start').style.display='none';connect();renderer.domElement.requestPointerLock?.();};
+renderer.domElement.onclick=()=>{if(myId)renderer.domElement.requestPointerLock?.();};
+document.addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===renderer.domElement);
+document.addEventListener('mousemove',e=>{if(locked){yaw-=e.movementX*.002;pitch=Math.max(-1.15,Math.min(.65,pitch-e.movementY*.002));}});
+document.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyV')cameraMode=1-cameraMode;if(e.code==='Enter'&&document.activeElement!==document.querySelector('#chatinput')){e.preventDefault();document.querySelector('#chatinput').focus();}});
+document.addEventListener('keyup',e=>keys[e.code]=false);
+document.querySelector('#chatrow').onsubmit=e=>{e.preventDefault();const i=document.querySelector('#chatinput'),m=i.value.trim();if(m&&ws?.readyState===1)ws.send(JSON.stringify({type:'chat',message:m}));i.value='';i.blur();};
+function animate(t){requestAnimationFrame(animate);const dt=Math.min(.05,(t-(animate.last||t))/1000);animate.last=t;
+const f=(keys.KeyW||keys.KeyZ?1:0)-(keys.KeyS?1:0),s=(keys.KeyD?1:0)-(keys.KeyA?1:0),speed=(keys.ShiftLeft||keys.ShiftRight)?10:5,sn=Math.sin(yaw),cs=Math.cos(yaw);
+local.x+=(s*cs-f*sn)*speed*dt;local.z+=(s*sn+f*cs)*speed*dt;if(keys.Space&&local.onGround){local.vy=8;local.onGround=false;}local.vy-=22*dt;local.y+=local.vy*dt;if(local.y<0){local.y=0;local.vy=0;local.onGround=true;}local.yaw=yaw;
+localMesh.position.set(local.x,local.y+1,local.z);localMesh.rotation.y=yaw;
+if(cameraMode===0){camera.position.set(local.x-Math.sin(yaw)*7,local.y+3.2,local.z-Math.cos(yaw)*7);camera.lookAt(local.x,local.y+1.3,local.z);}else{camera.position.set(local.x,local.y+1.55,local.z);camera.rotation.order='YXZ';camera.rotation.set(pitch,yaw,0);}
+for(const p of remote.values()){const v=p.mesh.position.clone().project(camera);p.label.style.left=((v.x*.5+.5)*innerWidth)+'px';p.label.style.top=((-v.y*.5+.5)*innerHeight-35)+'px';p.label.style.display=v.z<1?'block':'none';}
+if(ws?.readyState===1&&myId&&t-lastSend>50){ws.send(JSON.stringify({type:'move',x:local.x,y:local.y,z:local.z,yaw}));lastSend=t;}renderer.render(scene,camera);}
+requestAnimationFrame(animate);addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+</script></body></html>
