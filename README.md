@@ -53,13 +53,13 @@ Les variables déjà définies par l'hébergeur ont la priorité sur celles du f
 | `PORT` | Port HTTP fourni par l'hébergeur | `8080` |
 | `MAX_PLAYERS` | Nombre maximum de joueurs simultanés | `50` |
 | `ARKADIUM_DB` | Chemin du fichier SQLite | `./arkadium.sqlite3` |
-| `ADMIN_USERNAME` | Pseudo du compte administrateur | `Lesaxolotls` |
+| `ADMIN_USERNAME` | Pseudo d'un compte déjà créé qui reçoit le rôle administrateur | `Lesaxolotls` |
 | `SESSION_DURATION` | Durée des sessions en secondes | `2592000` (30 jours) |
 | `WORLD_NAME` | Nom affiché par le contrôle de santé | `ARKADIUM 3D` |
 
 **Important pour l'hébergement :** configure `ARKADIUM_DB` vers un dossier situé sur un disque/volume persistant et accessible en écriture, par exemple `/data/arkadium.sqlite3` si ton hébergeur monte un volume sur `/data`. Ne choisis pas un dossier temporaire si tu veux conserver les comptes et inventaires après redémarrage.
 
-Le serveur vérifie l'accès à SQLite au démarrage et affiche un message explicite si le chemin est inaccessible. Les tables existantes sont conservées ; elles ne sont pas supprimées ni réinitialisées.
+Le serveur vérifie l'accès à SQLite au démarrage et affiche un message explicite si le chemin est inaccessible. Le pseudo indiqué dans `ADMIN_USERNAME` doit déjà correspondre à un compte existant : le serveur ne donne jamais les droits administrateur à quelqu'un simplement parce qu'il vient de s'inscrire avec ce pseudo. Le rôle administrateur est attribué au compte configuré au démarrage. Les tables existantes sont conservées ; elles ne sont pas supprimées ni réinitialisées.
 
 ## État du prototype et limites
 
