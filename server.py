@@ -378,8 +378,14 @@ async def websocket_handler(request):
                                 await send_json(ws, {"type": "notice", "message": "Déconnexion : déplacements impossibles détectés."})
                                 await ws.close(code=4002, message=b"Anti-cheat")
                                 break
+                            await send_json(ws, {
+                                "type": "teleport",
+                                "x": current["x"], "y": current["y"], "z": current["z"]
+                            })
                             current["last_move_at"] = now
                             continue
+                    if current.get("anticheat_violations", 0) > 0:
+                        current["anticheat_violations"] -= 1
                     current["x"], current["y"], current["z"], current["yaw"] = x, y, z, new_yaw
                     current["last_move_at"] = now
                     await broadcast({"type": "move", "player": current}, exclude=player_id)
