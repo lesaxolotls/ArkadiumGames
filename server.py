@@ -13,11 +13,62 @@ from pathlib import Path
 
 from aiohttp import web, WSMsgType
 
-HOST = "0.0.0.0"
-PORT = int(os.getenv("PORT", "8080"))
-MAX_PLAYERS = int(os.getenv("MAX_PLAYERS", "50"))
-WEB_DIR = Path(__file__).parent / "web"
-DB_PATH = Path(os.getenv("ARKADIUM_DB", str(Path(__file__).parent / "arkadium.sqlite3")))
+BASE_DIR = Path(__file__).resolve().parent
+ENV_FILE = BASE_DIR / ".env"
+
+
+def load_env_file(path):
+    """Charge un fichier .env sans écraser les variables fournies par l'hébergeur."""
+    if not path.is_file():
+        print(f"[CONFIG] Aucun fichier .env trouvé ({path}); variables système utilisées.")
+        return
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            print(f"[CONFIG] Ligne {line_number} ignorée : format attendu NOM=VALEUR.")
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or not key.replace("_", "").isalnum():
+            print(f"[CONFIG] Ligne {line_number} ignorée : nom de variable invalide.")
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\\\"", "'"):
+            value = value[1:-1]
+        elif " #" in value:
+            value = value.split(" #", 1)[0].rstrip()
+        os.environ.setdefault(key, value)
+    print(f"[CONFIG] Configuration chargée depuis {path.name}.")
+
+
+load_env_file(ENV_FILE)
+
+
+def env_int(name, default, minimum, maximum):
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise RuntimeError(f"Configuration invalide : {name} doit être un nombre entier.")
+    if not minimum <= value <= maximum:
+        raise RuntimeError(f"Configuration invalide : {name} doit être compris entre {minimum} et {maximum}.")
+    return value
+
+
+HOST = os.getenv("HOST", "0.0.0.0").strip() or "0.0.0.0"
+PORT = env_int("PORT", 8080, 1, 65535)
+MAX_PLAYERS = env_int("MAX_PLAYERS", 50, 1, 1000)
+SESSION_DURATION = env_int("SESSION_DURATION", 30 * 24 * 60 * 60, 300, 365 * 24 * 60 * 60)
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Lesaxolotls").strip() or "Lesaxolotls"
+WORLD_NAME = os.getenv("WORLD_NAME", "ARKADIUM 3D").strip() or "ARKADIUM 3D"
+WEB_DIR = BASE_DIR / "web"
+DB_PATH = Path(os.getenv("ARKADIUM_DB", str(BASE_DIR / "arkadium.sqlite3"))).expanduser()
+if not DB_PATH.is_absolute():
+    DB_PATH = (BASE_DIR / DB_PATH).resolve()
 COOKIE_NAME = "arkadium_session"
 PASSWORD_ROUNDS = 310_000
 
@@ -70,7 +121,7 @@ def init_db():
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
         if "role" not in columns:
             conn.execute("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'player'")
-        conn.execute("UPDATE accounts SET role='admin' WHERE username_key='lesaxolotls'")
+        conn.execute("UPDATE accounts SET role='admin' WHERE username_key=?", (ADMIN_USERNAME.casefold(),))
         conn.execute("""CREATE TABLE IF NOT EXISTS sessions (
             token_hash TEXT PRIMARY KEY,
             account_id INTEGER NOT NULL,
@@ -78,13 +129,14 @@ def init_db():
             FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
         )""")
         # Compte initial : le mot de passe est stocke uniquement sous forme PBKDF2.
+        # Compte initial historique conservé pour ne pas casser les installations existantes.
         username = "Lesaxolotls"
         salt, digest = hash_password("Axio,2014", bytes.fromhex("25d11749b4fa9e5368e613b1bda6622a"))
         conn.execute(
             "INSERT OR IGNORE INTO accounts(username, username_key, salt, password_hash, inventory, created_at) VALUES(?,?,?,?,?,?)",
             (username, username.lower(), salt, digest, json.dumps({"wood": 0, "stone": 0, "crystal": 0}), int(time.time()))
         )
-        conn.execute("UPDATE accounts SET role='admin' WHERE username_key='lesaxolotls'")
+        conn.execute("UPDATE accounts SET role='admin' WHERE username_key=?", (ADMIN_USERNAME.casefold(),))
         conn.commit()
 
 
@@ -116,11 +168,11 @@ def set_session(response, account_id, request):
         conn.execute("DELETE FROM sessions WHERE expires_at<=?", (int(time.time()),))
         conn.execute(
             "INSERT INTO sessions(token_hash, account_id, expires_at) VALUES(?,?,?)",
-            (token_hash, account_id, int(time.time()) + 30 * 24 * 60 * 60)
+            (token_hash, account_id, int(time.time()) + SESSION_DURATION)
         )
         conn.commit()
     response.set_cookie(
-        COOKIE_NAME, token, max_age=30 * 24 * 60 * 60, httponly=True,
+        COOKIE_NAME, token, max_age=SESSION_DURATION, httponly=True,
         secure=request.secure, samesite="Lax", path="/"
     )
 
@@ -131,7 +183,7 @@ async def index(_request):
 
 async def health(_request):
     return web.json_response({
-        "status": "ok", "game": "ARKADIUM 3D",
+        "status": "ok", "game": WORLD_NAME,
         "players": len(players), "max_players": MAX_PLAYERS
     })
 
@@ -154,6 +206,8 @@ async def register(request):
                 "INSERT INTO accounts(username, username_key, salt, password_hash, inventory, created_at) VALUES(?,?,?,?,?,?)",
                 (username, username.lower(), salt, digest, json.dumps({"wood": 0, "stone": 0, "crystal": 0}), int(time.time()))
             )
+            if username.casefold() == ADMIN_USERNAME.casefold():
+                conn.execute("UPDATE accounts SET role='admin' WHERE id=?", (cursor.lastrowid,))
             account_id = cursor.lastrowid
             conn.commit()
     except sqlite3.IntegrityError:
@@ -455,6 +509,18 @@ async def websocket_handler(request):
 
 
 def create_app():
+    try:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with db() as conn:
+            conn.execute("SELECT 1")
+        print(f"[CONFIG] Base SQLite : {DB_PATH}")
+    except (OSError, sqlite3.Error) as exc:
+        raise RuntimeError(
+            f"Impossible d'ouvrir la base SQLite : {DB_PATH}. "
+            "Vérifie que le dossier existe et que l'hébergeur autorise l'écriture. "
+            "Configure ARKADIUM_DB vers le point de montage d'un disque persistant."
+        ) from exc
+    print(f"[CONFIG] Hôte={HOST} | Port={PORT} | Joueurs max={MAX_PLAYERS} | Admin={ADMIN_USERNAME}")
     init_db()
     app = web.Application()
     app.router.add_get("/", index)
