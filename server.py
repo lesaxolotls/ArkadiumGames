@@ -93,7 +93,7 @@ def account_from_cookie(request):
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     with db() as conn:
         row = conn.execute(
-            """SELECT a.id, a.username, a.inventory FROM sessions s
+            """SELECT a.id, a.username, a.inventory, a.role FROM sessions s
                JOIN accounts a ON a.id=s.account_id
                WHERE s.token_hash=? AND s.expires_at>?""",
             (token_hash, int(time.time()))
@@ -104,7 +104,7 @@ def account_from_cookie(request):
         inventory = json.loads(row["inventory"])
     except (TypeError, json.JSONDecodeError):
         inventory = {"wood": 0, "stone": 0, "crystal": 0}
-    return {"id": row["id"], "username": row["username"], "inventory": inventory}
+    return {"id": row["id"], "username": row["username"], "inventory": inventory, "role": row["role"], "is_admin": row["role"] == "admin"}
 
 
 def set_session(response, account_id, request):
@@ -170,7 +170,7 @@ async def login(request):
     password = str(data.get("password", ""))
     with db() as conn:
         row = conn.execute(
-            "SELECT id, username, salt, password_hash FROM accounts WHERE username_key=?",
+            "SELECT id, username, salt, password_hash, role FROM accounts WHERE username_key=?",
             (username.lower(),)
         ).fetchone()
     if not row:
@@ -178,7 +178,7 @@ async def login(request):
     _, candidate = hash_password(password, bytes.fromhex(row["salt"]))
     if not hmac.compare_digest(candidate, row["password_hash"]):
         return web.json_response({"error": "Identifiants incorrects."}, status=401)
-    response = web.json_response({"ok": True, "username": row["username"]})
+    response = web.json_response({"ok": True, "username": row["username"], "is_admin": row["role"] == "admin"})
     set_session(response, row["id"], request)
     return response
 
@@ -187,7 +187,7 @@ async def me(request):
     account = account_from_cookie(request)
     if not account:
         return web.json_response({"error": "Non connecte."}, status=401)
-    return web.json_response({"username": account["username"], "inventory": account["inventory"]})
+    return web.json_response({"username": account["username"], "inventory": account["inventory"], "role": account["role"], "is_admin": account["is_admin"]})
 
 
 async def logout(request):
@@ -234,7 +234,7 @@ async def websocket_handler(request):
     player = {
         "id": player_id, "account_id": account["id"], "name": account["username"],
         "x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0,
-        "health": 100, "last_attack": 0.0,
+        "health": 100, "last_attack": 0.0, "game_mode": "survival",
         "color": "#" + uuid.uuid4().hex[:6]
     }
     players[player_id] = player
@@ -243,7 +243,7 @@ async def websocket_handler(request):
         "type": "welcome", "id": player_id,
         "players": [p for p in players.values() if p["id"] != player_id],
         "max_players": MAX_PLAYERS, "username": account["username"],
-        "inventory": account["inventory"],
+        "inventory": account["inventory"], "is_admin": account["is_admin"],
         "pickups": list(available_pickups.values())
     })
     await broadcast({"type": "join", "player": player}, exclude=player_id)
