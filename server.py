@@ -63,8 +63,13 @@ def init_db():
             salt TEXT NOT NULL,
             password_hash TEXT NOT NULL,
             inventory TEXT NOT NULL DEFAULT '{"wood":0,"stone":0,"crystal":0}',
+            role TEXT NOT NULL DEFAULT 'player',
             created_at INTEGER NOT NULL
         )""")
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
+        if "role" not in columns:
+            conn.execute("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'player'")
+        conn.execute("UPDATE accounts SET role='admin' WHERE username_key='lesaxolotls'")
         conn.execute("""CREATE TABLE IF NOT EXISTS sessions (
             token_hash TEXT PRIMARY KEY,
             account_id INTEGER NOT NULL,
