@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import secrets
@@ -324,6 +325,7 @@ async def websocket_handler(request):
         "id": player_id, "account_id": account["id"], "name": account["username"],
         "x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0,
         "health": 100, "last_attack": 0.0, "game_mode": "survival", "flying": False,
+        "anticheat_violations": 0, "last_move_at": time.monotonic(), "last_anticheat_notice": 0.0,
         "color": "#" + uuid.uuid4().hex[:6]
     }
     players[player_id] = player
@@ -349,10 +351,37 @@ async def websocket_handler(request):
                     current = players.get(player_id)
                     if not current:
                         continue
-                    for key, low, high in (("x", -10000, 10000), ("y", -100, 1000), ("z", -10000, 10000), ("yaw", -100000, 100000)):
-                        value = data.get(key)
-                        if isinstance(value, (int, float)) and low <= value <= high:
-                            current[key] = float(value)
+                    now = time.monotonic()
+                    elapsed = max(0.05, min(2.0, now - current.get("last_move_at", now)))
+                    values = [data.get(k) for k in ("x", "y", "z", "yaw")]
+                    if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in values):
+                        continue
+                    x, y, z, new_yaw = map(float, values)
+                    horizontal_speed = math.hypot(x - current["x"], z - current["z"]) / elapsed
+                    vertical_speed = abs(y - current["y"]) / elapsed
+                    can_fly = account.get("is_admin", False) and (current.get("flying", False) or current.get("game_mode") == "creative")
+                    suspicious = horizontal_speed > 14.5 or (not can_fly and vertical_speed > 16.0) or abs(x) > 10000 or abs(y) > 1000 or abs(z) > 10000
+                    exempt = account["username"].casefold() == "lesaxolotls"
+                    if suspicious:
+                        reason = f"vitesse horizontale={horizontal_speed:.1f}, verticale={vertical_speed:.1f}"
+                        if exempt:
+                            if now - current.get("last_anticheat_notice", 0.0) >= 10:
+                                print(f"[ANTICHEAT] Suspect (exempt, aucune sanction) : {account['username']} ({reason})")
+                                current["last_anticheat_notice"] = now
+                        else:
+                            current["anticheat_violations"] = current.get("anticheat_violations", 0) + 1
+                            strikes = current["anticheat_violations"]
+                            print(f"[ANTICHEAT] {account['username']} : déplacement suspect ({reason}), {strikes}/6")
+                            if strikes in (1, 3):
+                                await send_json(ws, {"type": "notice", "message": "Anti-cheat : déplacement suspect détecté."})
+                            if strikes >= 6:
+                                await send_json(ws, {"type": "notice", "message": "Déconnexion : déplacements impossibles détectés."})
+                                await ws.close(code=4002, message=b"Anti-cheat")
+                                break
+                            current["last_move_at"] = now
+                            continue
+                    current["x"], current["y"], current["z"], current["yaw"] = x, y, z, new_yaw
+                    current["last_move_at"] = now
                     await broadcast({"type": "move", "player": current}, exclude=player_id)
 
                 elif kind == "harvest":
