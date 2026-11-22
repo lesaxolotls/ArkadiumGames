@@ -11,16 +11,16 @@
 #chat{position:absolute;right:16px;bottom:16px;width:min(340px,calc(100vw - 32px));pointer-events:auto}#messages{height:140px;overflow:auto;font-size:13px;line-height:1.4;margin-bottom:8px;overflow-wrap:anywhere}
 #chatrow{display:flex;gap:6px}input{min-width:0;flex:1;background:#18232d;color:white;border:1px solid #59636d;border-radius:6px;padding:10px}
 button{background:#a83232;color:white;border:0;border-radius:6px;padding:10px 13px;cursor:pointer;font-weight:bold}
-#start{position:absolute;inset:0;display:grid;place-items:center;background:#071018c9;pointer-events:auto}#start .panel{text-align:center;max-width:420px;margin:20px}#start p{line-height:1.5;color:#d5dbe0}
+#start{position:absolute;inset:0;display:grid;place-items:center;background:#071018c9;pointer-events:auto}#start .panel{text-align:center;max-width:420px;margin:20px}#start p{line-height:1.5;color:#d5dbe0}#authbox{display:grid;gap:8px;text-align:left;margin:12px 0}#authbox label{font-size:12px;color:#d5dbe0}#authbox input{width:100%;margin-top:4px}#authbuttons{display:flex;gap:8px}#authbuttons button{flex:1}#authmessage{min-height:18px;color:#ffb0b0;font-size:13px}#accountbar{position:absolute;top:64px;right:16px;pointer-events:auto}#inventory{position:absolute;left:16px;top:66px;min-width:170px;font-size:13px;line-height:1.7}#pickups{display:none}
 #crosshair{position:absolute;left:50%;top:50%;width:5px;height:5px;border-radius:50%;background:white;box-shadow:0 0 3px #000}
 @media(max-width:600px){#help{display:none}#stats{font-size:12px}#messages{height:90px}}
 </style></head>
 <body>
 <div id="hud">
 <div id="brand">⚔ ARKADIUM 3D</div><div id="healthbox">VIE <span id="healthvalue">100</span> / 100<div id="healthtrack"><div id="healthfill"></div></div></div><div id="damageflash"></div><div id="stats" class="panel"><div id="connection">Connexion…</div><div id="count">0 / 50 joueurs</div></div>
-<div id="help" class="panel">ZQSD / WASD : bouger<br>Espace : sauter · Maj : courir · F : attaquer<br>V : changer de caméra<br>Échap : libérer la souris<br><b>Manette Xbox</b><br>Stick gauche : bouger · Stick droit : caméra<br>A : sauter · B : caméra · X : attaquer<br>Clic stick gauche : courir · Menu : libérer souris<br>Entrée : discuter</div><div id="crosshair"></div>
+<div id="help" class="panel">ZQSD / WASD : bouger<br>Espace : sauter · Maj : courir · F : attaquer · E : récolter<br>V : changer de caméra<br>Échap : libérer la souris<br><b>Manette Xbox</b><br>Stick gauche : bouger · Stick droit : caméra<br>A : sauter · B : caméra · X : attaquer<br>Clic stick gauche : courir · Y : récolter<br>Menu : libérer souris · Entrée : discuter</div><div id="crosshair"></div>
 <div id="chat" class="panel"><div id="messages"></div><form id="chatrow"><input id="chatinput" maxlength="240" placeholder="Écrire un message…"><button>Envoyer</button></form></div>
-<div id="start"><div class="panel"><h1>⚔ ARKADIUM 3D</h1><p>Explore le monde et retrouve les autres joueurs.</p><p>Choisis ton nom puis clique pour jouer.</p><input id="playername" maxlength="16" value="Joueur" aria-label="Ton nom"><p><button id="play">JOUER</button></p><small>Prototype multijoueur en développement</small></div></div>
+<div id="accountbar" class="panel" style="display:none"><span id="accountname"></span> <button id="logout">Déconnexion</button></div><div id="inventory" class="panel" style="display:none"><b>🎒 INVENTAIRE</b><br>🪵 Bois : <span id="woodcount">0</span><br>🪨 Pierre : <span id="stonecount">0</span><br>💎 Cristal : <span id="crystalcount">0</span><br><small>Approche-toi et appuie sur E / Y</small></div><div id="start"><div class="panel"><h1>⚔ ARKADIUM 3D</h1><p>Connecte-toi ou crée ton compte pour jouer.</p><div id="authbox"><label>Pseudo<input id="authusername" maxlength="16" value="Lesaxolotls" autocomplete="username"></label><label>Mot de passe<input id="authpassword" type="password" autocomplete="current-password"></label><div id="authbuttons"><button id="loginbutton">Connexion</button><button id="registerbutton">Créer un compte</button></div><div id="authmessage"></div></div><div id="loggedin" style="display:none"><p>Connecté en tant que <b id="loggedname"></b></p><button id="play">JOUER</button></div><small>Prototype multijoueur en développement</small></div></div>
 </div>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js';
@@ -37,13 +37,17 @@ const treeDummy=new THREE.Object3D();const trunks=new THREE.InstancedMesh(new TH
 for(let i=0;i<treePositions.length;i++){const [x,z]=treePositions[i];treeDummy.position.set(x,1,z);treeDummy.updateMatrix();trunks.setMatrixAt(i,treeDummy.matrix);treeDummy.position.set(x,3.8,z);treeDummy.updateMatrix();crowns.setMatrixAt(i,treeDummy.matrix);}
 trunks.instanceMatrix.needsUpdate=true;crowns.instanceMatrix.needsUpdate=true;scene.add(trunks,crowns);
 const bodyGeo=new THREE.CapsuleGeometry(.42,.9,4,8),remote=new Map(),local={x:0,y:0,z:0,vy:0,onGround:true,yaw:0};
+const pickupMeshes=new Map();let inventory={wood:0,stone:0,crystal:0},accountName='';
+function showInventory(inv){inventory=inv||inventory;for(const k of ['wood','stone','crystal'])document.querySelector('#'+k+'count').textContent=inventory[k]||0;}
+function addPickup(p){if(pickupMeshes.has(p.id))return;const color=p.type==='wood'?0x9b6538:p.type==='stone'?0x9299a2:0x54e8ff;const geometry=p.type==='wood'?new THREE.BoxGeometry(.8,.35,.35):p.type==='stone'?new THREE.DodecahedronGeometry(.48,0):new THREE.OctahedronGeometry(.5,0);const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color,emissive:p.type==='crystal'?0x123344:0x000000}));mesh.position.set(p.x,.45,p.z);scene.add(mesh);pickupMeshes.set(p.id,{mesh,data:p});}
+function collectNearest(){if(!ws||ws.readyState!==1)return;let nearest=null,dist=3.5;for(const item of pickupMeshes.values()){const d=Math.hypot(item.data.x-local.x,item.data.z-local.z);if(d<dist){dist=d;nearest=item.data;}}if(nearest)ws.send(JSON.stringify({type:'harvest',id:nearest.id}));else say('Aucune ressource a proximite.');}
 const localMesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:0x3b82f6}));localMesh.position.y=1;scene.add(localMesh);
 let myId=null,ws=null,yaw=0,pitch=-.18,cameraMode=0,locked=false,lastSend=0,health=100,lastAttack=0;const keys={};let previousPadButtons=[];let padConnected=false;let padMoveX=0,padMoveY=0,padLookX=0,padLookY=0,padJump=false,padSprint=false,padAttack=false;
 function makePlayer(p){const mesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:p.color||0xff5555}));mesh.position.set(p.x||0,1,p.z||0);scene.add(mesh);const label=document.createElement('div');label.style.cssText='position:fixed;color:white;font-size:12px;text-shadow:0 1px 4px black;pointer-events:none;transform:translate(-50%,-50%)';label.textContent=p.name||'Joueur';document.body.appendChild(label);return{mesh,label,name:p.name||'Joueur'};}
 function say(s){const e=document.createElement('div');e.textContent=s;const box=document.querySelector('#messages');box.append(e);box.scrollTop=box.scrollHeight;}
 function count(){document.querySelector('#count').textContent=(remote.size+(myId?1:0))+' / '+(ws?.maxPlayers||50)+' joueurs';}
 function connect(){const scheme=location.protocol==='https:'?'wss':'ws';ws=new WebSocket(scheme+'://'+location.host+'/ws');ws.onopen=()=>document.querySelector('#connection').textContent='Connecté';ws.onclose=()=>document.querySelector('#connection').textContent='Déconnecté';ws.onerror=()=>document.querySelector('#connection').textContent='Erreur réseau';
-ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='welcome'){myId=d.id;ws.maxPlayers=d.max_players;for(const p of d.players)if(p.id!==myId)remote.set(p.id,makePlayer(p));ws.send(JSON.stringify({type:'name',name:document.querySelector('#playername').value}));count();}
+ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='welcome'){myId=d.id;ws.maxPlayers=d.max_players;accountName=d.username;showInventory(d.inventory);for(const p of d.players)if(p.id!==myId)remote.set(p.id,makePlayer(p));for(const p of d.pickups||[])addPickup(p);count();}
 else if(d.type==='join'){if(!remote.has(d.player.id))remote.set(d.player.id,makePlayer(d.player));count();}
 else if(d.type==='leave'){const p=remote.get(d.id);if(p){scene.remove(p.mesh);p.label.remove();remote.delete(d.id);}count();}
 else if(d.type==='move'){const p=remote.get(d.player.id);if(p){p.mesh.position.set(d.player.x,d.player.y+1,d.player.z);p.mesh.rotation.y=d.player.yaw;}}
@@ -51,12 +55,15 @@ else if(d.type==='rename'){const p=remote.get(d.id);if(p){p.name=d.name;p.label.
 else if(d.type==='health'){if(d.player_id===myId){const before=health;health=d.health;document.querySelector('#healthvalue').textContent=health;document.querySelector('#healthfill').style.width=health+'%';document.querySelector('#healthfill').style.background=health<=30?'#e33':'#39c76a';if(health<before){const flash=document.querySelector('#damageflash');flash.style.opacity='.28';setTimeout(()=>flash.style.opacity='0',130);const gp=Array.from(navigator.getGamepads?.()||[]).find(p=>p?.connected);const actuator=gp?.vibrationActuator;if(actuator?.playEffect){try{const rumble=actuator.playEffect('dual-rumble',{duration:180,strongMagnitude:.65,weakMagnitude:.35});rumble?.catch?.(()=>{});}catch(_){}}}}}
 else if(d.type==='respawn'){if(d.player_id===myId){local.x=0;local.y=0;local.z=0;local.vy=0;health=100;document.querySelector('#healthvalue').textContent='100';document.querySelector('#healthfill').style.width='100%';say('Tu as été réapparu.');}else{const p=remote.get(d.player_id);if(p)p.mesh.position.set(0,1,0);}}
 else if(d.type==='attack_result'){say(d.hit?'Coup réussi !':'Aucun joueur à portée.');}
+else if(d.type==='inventory')showInventory(d.inventory);
+else if(d.type==='pickup_removed'){const item=pickupMeshes.get(d.id);if(item){scene.remove(item.mesh);pickupMeshes.delete(d.id);}}
+else if(d.type==='notice')say(d.message);
 else if(d.type==='chat')say(d.name+': '+d.message);else if(d.type==='error')say(d.message);};}
-document.querySelector('#play').onclick=()=>{document.querySelector('#start').style.display='none';connect();renderer.domElement.requestPointerLock?.();};
+document.querySelector('#play').onclick=()=>{document.querySelector('#start').style.display='none';document.querySelector('#inventory').style.display='block';document.querySelector('#accountbar').style.display='block';document.querySelector('#accountname').textContent=accountName;connect();renderer.domElement.requestPointerLock?.();};
 renderer.domElement.onclick=()=>{if(myId)renderer.domElement.requestPointerLock?.();};
 document.addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===renderer.domElement);
 document.addEventListener('mousemove',e=>{if(locked){yaw-=e.movementX*.002;pitch=Math.max(-1.15,Math.min(.65,pitch-e.movementY*.002));}});
-document.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF')attack();if(e.code==='KeyV')cameraMode=1-cameraMode;if(e.code==='Enter'&&document.activeElement!==document.querySelector('#chatinput')){e.preventDefault();document.querySelector('#chatinput').focus();}});
+document.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyE')collectNearest();if(e.code==='KeyF')attack();if(e.code==='KeyV')cameraMode=1-cameraMode;if(e.code==='Enter'&&document.activeElement!==document.querySelector('#chatinput')){e.preventDefault();document.querySelector('#chatinput').focus();}});
 document.addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('gamepadconnected',e=>{padConnected=true;document.querySelector('#connection').textContent='Manette connectée';say('Manette détectée : '+(e.gamepad.id||'Xbox'));});
 addEventListener('gamepaddisconnected',()=>{padConnected=false;padMoveX=padMoveY=padLookX=padLookY=0;padJump=padSprint=false;say('Manette déconnectée');});
@@ -70,7 +77,7 @@ function readGamepad(){
   const pressed=(n)=>!!pad.buttons[n]?.pressed;
   /* Xbox Edge : conserver l'ordre standard Xbox. Le stick gauche déplace, le droit oriente la caméra. */
    padMoveX=axis(0);padMoveY=axis(1);padLookX=axis(2);padLookY=axis(3);
-  padJump=pressed(0);padSprint=pressed(10);padAttack=pressed(2);if(padAttack&&!previousPadButtons[2])attack();
+  padJump=pressed(0);padSprint=pressed(10);padAttack=pressed(2);if(padAttack&&!previousPadButtons[2])attack();if(pressed(3)&&!previousPadButtons[3])collectNearest();
   if(pressed(1)&&!previousPadButtons[1])cameraMode=1-cameraMode; // B
   if(pressed(9)&&!previousPadButtons[9]&&document.pointerLockElement)document.exitPointerLock?.(); // Menu
   if(pressed(0)&&document.querySelector('#start').style.display!=='none'){
@@ -78,6 +85,28 @@ function readGamepad(){
   }
   previousPadButtons=pad.buttons.map(b=>!!b.pressed);
 }
+
+async function authRequest(path){
+ const message=document.querySelector('#authmessage');message.textContent='Connexion en cours…';
+ const username=document.querySelector('#authusername').value.trim();
+ const password=document.querySelector('#authpassword').value;
+ try{
+  const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({username,password})});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||'Erreur de connexion.');
+  accountName=data.username;message.textContent='';
+  document.querySelector('#authbox').style.display='none';
+  document.querySelector('#loggedin').style.display='block';
+  document.querySelector('#loggedname').textContent=accountName;
+  document.querySelector('#accountbar').style.display='block';
+  document.querySelector('#accountname').textContent=accountName;
+ }catch(error){message.textContent=error.message;}
+}
+document.querySelector('#loginbutton').onclick=()=>authRequest('/api/login');
+document.querySelector('#registerbutton').onclick=()=>authRequest('/api/register');
+document.querySelector('#logout').onclick=async()=>{await fetch('/api/logout',{method:'POST',credentials:'same-origin'});location.reload();};
+(async()=>{try{const r=await fetch('/api/me',{credentials:'same-origin'});if(r.ok){const d=await r.json();accountName=d.username;showInventory(d.inventory);document.querySelector('#authbox').style.display='none';document.querySelector('#loggedin').style.display='block';document.querySelector('#loggedname').textContent=accountName;document.querySelector('#accountbar').style.display='block';document.querySelector('#accountname').textContent=accountName;}}catch(_){}})();
+
 document.querySelector('#chatrow').onsubmit=e=>{e.preventDefault();const i=document.querySelector('#chatinput'),m=i.value.trim();if(m&&ws?.readyState===1)ws.send(JSON.stringify({type:'chat',message:m}));i.value='';i.blur();};
 function animate(t){requestAnimationFrame(animate);const dt=Math.min(.05,(t-(animate.last||t))/1000);animate.last=t;readGamepad();
 const keyboardForward=(keys.KeyW||keys.KeyZ?1:0)-(keys.KeyS?1:0),keyboardSide=(keys.KeyD?1:0)-(keys.KeyA?1:0);
