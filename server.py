@@ -37,7 +37,7 @@ def load_env_file(path):
         if not key or not key.replace("_", "").isalnum():
             print(f"[CONFIG] Ligne {line_number} ignorée : nom de variable invalide.")
             continue
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\\\"", "'"):
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
             value = value[1:-1]
         elif " #" in value:
             value = value.split(" #", 1)[0].rstrip()
