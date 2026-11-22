@@ -41,10 +41,25 @@ Prototype de jeu de survie 3D jouable dans un navigateur, avec déplacements et 
 
 La configuration Docker est également fournie.
 
-## Configuration
+## Configuration avec `.env`
 
-- `PORT` : port HTTP, valeur par défaut 8080.
-- `MAX_PLAYERS` : nombre maximum de connexions simultanées, valeur par défaut 50.
+Au démarrage, le serveur lit automatiquement le fichier `.env` situé à la racine du projet. Le fichier `.env.example` fourni sert de modèle : copie-le sous le nom `.env`, puis adapte les valeurs.
+
+Les variables déjà définies par l'hébergeur ont la priorité sur celles du fichier `.env` (notamment `PORT`).
+
+| Variable | Rôle | Valeur par défaut |
+|---|---|---|
+| `HOST` | Adresse d'écoute du serveur | `0.0.0.0` |
+| `PORT` | Port HTTP fourni par l'hébergeur | `8080` |
+| `MAX_PLAYERS` | Nombre maximum de joueurs simultanés | `50` |
+| `ARKADIUM_DB` | Chemin du fichier SQLite | `./arkadium.sqlite3` |
+| `ADMIN_USERNAME` | Pseudo du compte administrateur | `Lesaxolotls` |
+| `SESSION_DURATION` | Durée des sessions en secondes | `2592000` (30 jours) |
+| `WORLD_NAME` | Nom affiché par le contrôle de santé | `ARKADIUM 3D` |
+
+**Important pour l'hébergement :** configure `ARKADIUM_DB` vers un dossier situé sur un disque/volume persistant et accessible en écriture, par exemple `/data/arkadium.sqlite3` si ton hébergeur monte un volume sur `/data`. Ne choisis pas un dossier temporaire si tu veux conserver les comptes et inventaires après redémarrage.
+
+Le serveur vérifie l'accès à SQLite au démarrage et affiche un message explicite si le chemin est inaccessible. Les tables existantes sont conservées ; elles ne sont pas supprimées ni réinitialisées.
 
 ## État du prototype et limites
 
