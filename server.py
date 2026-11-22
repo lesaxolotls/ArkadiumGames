@@ -228,20 +228,27 @@ async def handle_command(raw, player_id, account, ws):
     admin = account.get("is_admin", False)
     current = players.get(player_id)
     if command == "/help":
-        await send_json(ws, {"type": "notice", "message": "Commandes : /help, /me. Admin : /admin, /gamemode, /tp, /heal, /give, /kick."})
+        await send_json(ws, {"type": "notice", "message": "Commandes : /help, /me. Admin : /admin, /fly, /gamemode, /tp, /heal, /give, /kick."})
         return
     if command == "/me":
         await send_json(ws, {"type": "notice", "message": "Connecté : " + account["username"] + (" (ADMIN)" if admin else " (Joueur)")})
         return
-    if command not in ("/admin", "/gamemode", "/tp", "/heal", "/give", "/kick"):
+    if command not in ("/admin", "/fly", "/gamemode", "/tp", "/heal", "/give", "/kick"):
         await send_json(ws, {"type": "notice", "message": "Commande inconnue. Tape /help."})
         return
     if not admin:
         await send_json(ws, {"type": "notice", "message": "Commande réservée aux administrateurs."})
         return
     if command == "/admin":
-        msg = "ADMIN : /gamemode creative|survival · /tp pseudo · /heal [pseudo] · /give bois|pierre|cristal quantité · /kick pseudo"
+        msg = "ADMIN : /fly · /gamemode creative|survival · /tp pseudo · /heal [pseudo] · /give bois|pierre|cristal quantité · /kick pseudo"
         await send_json(ws, {"type": "notice", "message": msg})
+    elif command == "/fly":
+        if args:
+            await send_json(ws, {"type": "notice", "message": "Utilisation : /fly"})
+            return
+        current["flying"] = not current.get("flying", False)
+        await send_json(ws, {"type": "fly", "enabled": current["flying"]})
+        await send_json(ws, {"type": "notice", "message": "Vol activé." if current["flying"] else "Vol désactivé."})
     elif command == "/gamemode":
         if len(args) != 1 or args[0].lower() not in ("creative", "survival"):
             await send_json(ws, {"type": "notice", "message": "Utilisation : /gamemode creative ou /gamemode survival"})
@@ -316,7 +323,7 @@ async def websocket_handler(request):
     player = {
         "id": player_id, "account_id": account["id"], "name": account["username"],
         "x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0,
-        "health": 100, "last_attack": 0.0, "game_mode": "survival",
+        "health": 100, "last_attack": 0.0, "game_mode": "survival", "flying": False,
         "color": "#" + uuid.uuid4().hex[:6]
     }
     players[player_id] = player
