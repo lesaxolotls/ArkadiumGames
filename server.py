@@ -121,6 +121,7 @@ def init_db():
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
         if "role" not in columns:
             conn.execute("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'player'")
+        conn.execute("UPDATE accounts SET role='player' WHERE role='admin' AND username_key<>?", (ADMIN_USERNAME.casefold(),))
         conn.execute("UPDATE accounts SET role='admin' WHERE username_key=?", (ADMIN_USERNAME.casefold(),))
         conn.execute("""CREATE TABLE IF NOT EXISTS sessions (
             token_hash TEXT PRIMARY KEY,
@@ -136,6 +137,7 @@ def init_db():
             "INSERT OR IGNORE INTO accounts(username, username_key, salt, password_hash, inventory, created_at) VALUES(?,?,?,?,?,?)",
             (username, username.lower(), salt, digest, json.dumps({"wood": 0, "stone": 0, "crystal": 0}), int(time.time()))
         )
+        conn.execute("UPDATE accounts SET role='player' WHERE role='admin' AND username_key<>?", (ADMIN_USERNAME.casefold(),))
         conn.execute("UPDATE accounts SET role='admin' WHERE username_key=?", (ADMIN_USERNAME.casefold(),))
         conn.commit()
 
@@ -206,8 +208,6 @@ async def register(request):
                 "INSERT INTO accounts(username, username_key, salt, password_hash, inventory, created_at) VALUES(?,?,?,?,?,?)",
                 (username, username.lower(), salt, digest, json.dumps({"wood": 0, "stone": 0, "crystal": 0}), int(time.time()))
             )
-            if username.casefold() == ADMIN_USERNAME.casefold():
-                conn.execute("UPDATE accounts SET role='admin' WHERE id=?", (cursor.lastrowid,))
             account_id = cursor.lastrowid
             conn.commit()
     except sqlite3.IntegrityError:
