@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 import uuid
 from pathlib import Path
 
@@ -64,6 +65,8 @@ async def websocket_handler(request):
         "y": 0.0,
         "z": 0.0,
         "yaw": 0.0,
+        "health": 100,
+        "last_attack": 0.0,
         "color": "#" + uuid.uuid4().hex[:6]
     }
     players[player_id] = player
@@ -100,6 +103,35 @@ async def websocket_handler(request):
                         if isinstance(value, (int, float)) and low <= value <= high:
                             current[key] = float(value)
                     await broadcast({"type": "move", "player": current}, exclude=player_id)
+
+                elif kind == "attack":
+                    now = time.monotonic()
+                    attacker = players.get(player_id)
+                    if not attacker or now - attacker.get("last_attack", 0) < 0.5:
+                        continue
+                    attacker["last_attack"] = now
+                    target_id = None
+                    target_distance = 3.2
+                    for other_id, other in players.items():
+                        if other_id == player_id:
+                            continue
+                        distance = ((other["x"] - attacker["x"]) ** 2 + (other["z"] - attacker["z"]) ** 2) ** 0.5
+                        if distance < target_distance:
+                            target_id, target_distance = other_id, distance
+                    if target_id is None:
+                        await send_json(ws, {"type": "attack_result", "hit": False})
+                    else:
+                        target = players[target_id]
+                        target["health"] = max(0, target.get("health", 100) - 25)
+                        await broadcast({"type": "health", "player_id": target_id, "health": target["health"]})
+                        await send_json(ws, {"type": "attack_result", "hit": True})
+                        if target["health"] <= 0:
+                            target["x"] = 0.0
+                            target["y"] = 0.0
+                            target["z"] = 0.0
+                            target["health"] = 100
+                            await broadcast({"type": "respawn", "player_id": target_id, "x": 0, "y": 0, "z": 0})
+                            await broadcast({"type": "health", "player_id": target_id, "health": 100})
 
                 elif kind == "name":
                     name = str(data.get("name", "Joueur")).strip()[:16]
