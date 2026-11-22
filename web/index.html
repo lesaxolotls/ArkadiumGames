@@ -7,7 +7,7 @@
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101820;color:#fff;font-family:Arial,sans-serif}canvas{display:block}
 #hud{position:fixed;inset:0;pointer-events:none}.panel{background:#101820dc;border:1px solid #a83232;border-radius:10px;padding:12px;backdrop-filter:blur(8px)}
 #brand{position:absolute;top:16px;left:16px;font-weight:900;font-size:22px;color:#ff5555;text-shadow:0 2px 8px #000}
-#stats{position:absolute;top:16px;right:16px;text-align:right}#help{position:absolute;left:16px;bottom:16px;font-size:13px;line-height:1.6}
+#stats{position:absolute;top:16px;right:16px;text-align:right}#healthbox{position:absolute;top:16px;left:50%;transform:translateX(-50%);width:min(260px,42vw);background:#101820dc;border:1px solid #59636d;border-radius:8px;padding:7px 10px;text-align:center;font-weight:bold;text-shadow:0 1px 3px #000}#healthtrack{height:12px;background:#4b2020;border-radius:8px;overflow:hidden;margin-top:5px}#healthfill{height:100%;width:100%;background:#39c76a;transition:width .15s}#damageflash{position:fixed;inset:0;pointer-events:none;background:#ff0000;opacity:0;transition:opacity .12s}#help{position:absolute;left:16px;bottom:16px;font-size:13px;line-height:1.6}
 #chat{position:absolute;right:16px;bottom:16px;width:min(340px,calc(100vw - 32px));pointer-events:auto}#messages{height:140px;overflow:auto;font-size:13px;line-height:1.4;margin-bottom:8px;overflow-wrap:anywhere}
 #chatrow{display:flex;gap:6px}input{min-width:0;flex:1;background:#18232d;color:white;border:1px solid #59636d;border-radius:6px;padding:10px}
 button{background:#a83232;color:white;border:0;border-radius:6px;padding:10px 13px;cursor:pointer;font-weight:bold}
@@ -17,8 +17,8 @@ button{background:#a83232;color:white;border:0;border-radius:6px;padding:10px 13
 </style></head>
 <body>
 <div id="hud">
-<div id="brand">⚔ ARKADIUM 3D</div><div id="stats" class="panel"><div id="connection">Connexion…</div><div id="count">0 / 50 joueurs</div></div>
-<div id="help" class="panel">ZQSD / WASD : bouger<br>Espace : sauter · Maj : courir<br>V : changer de caméra<br>Échap : libérer la souris<br><b>Manette Xbox</b><br>Stick gauche : bouger · Stick droit : caméra<br>A : sauter · B : changer de caméra<br>Clic stick gauche : courir · Menu : libérer souris<br>Entrée : discuter</div><div id="crosshair"></div>
+<div id="brand">⚔ ARKADIUM 3D</div><div id="healthbox">VIE <span id="healthvalue">100</span> / 100<div id="healthtrack"><div id="healthfill"></div></div></div><div id="damageflash"></div><div id="stats" class="panel"><div id="connection">Connexion…</div><div id="count">0 / 50 joueurs</div></div>
+<div id="help" class="panel">ZQSD / WASD : bouger<br>Espace : sauter · Maj : courir · F : attaquer<br>V : changer de caméra<br>Échap : libérer la souris<br><b>Manette Xbox</b><br>Stick gauche : bouger · Stick droit : caméra<br>A : sauter · B : caméra · X : attaquer<br>Clic stick gauche : courir · Menu : libérer souris<br>Entrée : discuter</div><div id="crosshair"></div>
 <div id="chat" class="panel"><div id="messages"></div><form id="chatrow"><input id="chatinput" maxlength="240" placeholder="Écrire un message…"><button>Envoyer</button></form></div>
 <div id="start"><div class="panel"><h1>⚔ ARKADIUM 3D</h1><p>Explore le monde et retrouve les autres joueurs.</p><p>Choisis ton nom puis clique pour jouer.</p><input id="playername" maxlength="16" value="Joueur" aria-label="Ton nom"><p><button id="play">JOUER</button></p><small>Prototype multijoueur en développement</small></div></div>
 </div>
@@ -38,7 +38,7 @@ for(let i=0;i<treePositions.length;i++){const [x,z]=treePositions[i];treeDummy.p
 trunks.instanceMatrix.needsUpdate=true;crowns.instanceMatrix.needsUpdate=true;scene.add(trunks,crowns);
 const bodyGeo=new THREE.CapsuleGeometry(.42,.9,4,8),remote=new Map(),local={x:0,y:0,z:0,vy:0,onGround:true,yaw:0};
 const localMesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:0x3b82f6}));localMesh.position.y=1;scene.add(localMesh);
-let myId=null,ws=null,yaw=0,pitch=-.18,cameraMode=0,locked=false,lastSend=0;const keys={};let previousPadButtons=[];let padConnected=false;let padMoveX=0,padMoveY=0,padLookX=0,padLookY=0,padJump=false,padSprint=false;
+let myId=null,ws=null,yaw=0,pitch=-.18,cameraMode=0,locked=false,lastSend=0,health=100,lastAttack=0;const keys={};let previousPadButtons=[];let padConnected=false;let padMoveX=0,padMoveY=0,padLookX=0,padLookY=0,padJump=false,padSprint=false,padAttack=false;
 function makePlayer(p){const mesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:p.color||0xff5555}));mesh.position.set(p.x||0,1,p.z||0);scene.add(mesh);const label=document.createElement('div');label.style.cssText='position:fixed;color:white;font-size:12px;text-shadow:0 1px 4px black;pointer-events:none;transform:translate(-50%,-50%)';label.textContent=p.name||'Joueur';document.body.appendChild(label);return{mesh,label,name:p.name||'Joueur'};}
 function say(s){const e=document.createElement('div');e.textContent=s;const box=document.querySelector('#messages');box.append(e);box.scrollTop=box.scrollHeight;}
 function count(){document.querySelector('#count').textContent=(remote.size+(myId?1:0))+' / '+(ws?.maxPlayers||50)+' joueurs';}
@@ -48,15 +48,19 @@ else if(d.type==='join'){if(!remote.has(d.player.id))remote.set(d.player.id,make
 else if(d.type==='leave'){const p=remote.get(d.id);if(p){scene.remove(p.mesh);p.label.remove();remote.delete(d.id);}count();}
 else if(d.type==='move'){const p=remote.get(d.player.id);if(p){p.mesh.position.set(d.player.x,d.player.y+1,d.player.z);p.mesh.rotation.y=d.player.yaw;}}
 else if(d.type==='rename'){const p=remote.get(d.id);if(p){p.name=d.name;p.label.textContent=d.name;}}
+else if(d.type==='health'){if(d.player_id===myId){const before=health;health=d.health;document.querySelector('#healthvalue').textContent=health;document.querySelector('#healthfill').style.width=health+'%';document.querySelector('#healthfill').style.background=health<=30?'#e33':'#39c76a';if(health<before){const flash=document.querySelector('#damageflash');flash.style.opacity='.28';setTimeout(()=>flash.style.opacity='0',130);const gp=Array.from(navigator.getGamepads?.()||[]).find(p=>p?.connected);gp?.vibrationActuator?.playEffect?.('dual-rumble',{duration:180,strongMagnitude:.65,weakMagnitude:.35}).catch?.(()=>{});}}}
+else if(d.type==='respawn'&&d.player_id===myId){local.x=0;local.y=0;local.z=0;local.vy=0;health=100;document.querySelector('#healthvalue').textContent='100';document.querySelector('#healthfill').style.width='100%';say('Tu as été réapparu.');}
+else if(d.type==='attack_result'){say(d.hit?'Coup réussi !':'Aucun joueur à portée.');}
 else if(d.type==='chat')say(d.name+': '+d.message);else if(d.type==='error')say(d.message);};}
 document.querySelector('#play').onclick=()=>{document.querySelector('#start').style.display='none';connect();renderer.domElement.requestPointerLock?.();};
 renderer.domElement.onclick=()=>{if(myId)renderer.domElement.requestPointerLock?.();};
 document.addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===renderer.domElement);
 document.addEventListener('mousemove',e=>{if(locked){yaw-=e.movementX*.002;pitch=Math.max(-1.15,Math.min(.65,pitch-e.movementY*.002));}});
-document.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyV')cameraMode=1-cameraMode;if(e.code==='Enter'&&document.activeElement!==document.querySelector('#chatinput')){e.preventDefault();document.querySelector('#chatinput').focus();}});
+document.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyF')attack();if(e.code==='KeyV')cameraMode=1-cameraMode;if(e.code==='Enter'&&document.activeElement!==document.querySelector('#chatinput')){e.preventDefault();document.querySelector('#chatinput').focus();}});
 document.addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('gamepadconnected',e=>{padConnected=true;document.querySelector('#connection').textContent='Manette connectée';say('Manette détectée : '+(e.gamepad.id||'Xbox'));});
 addEventListener('gamepaddisconnected',()=>{padConnected=false;padMoveX=padMoveY=padLookX=padLookY=0;padJump=padSprint=false;say('Manette déconnectée');});
+function attack(){const now=performance.now();if(!myId||ws?.readyState!==1||now-lastAttack<500)return;lastAttack=now;ws.send(JSON.stringify({type:'attack'}));}
 function readGamepad(){
   const pads=navigator.getGamepads?navigator.getGamepads():[];
   const pad=Array.from(pads).find(p=>p&&p.connected);
@@ -66,7 +70,7 @@ function readGamepad(){
   const pressed=(n)=>!!pad.buttons[n]?.pressed;
   /* Xbox Edge : conserver l'ordre standard Xbox. Le stick gauche déplace, le droit oriente la caméra. */
    padMoveX=axis(0);padMoveY=axis(1);padLookX=axis(2);padLookY=axis(3);
-  padJump=pressed(0);padSprint=pressed(10);
+  padJump=pressed(0);padSprint=pressed(10);padAttack=pressed(2);if(padAttack&&!previousPadButtons[2])attack();
   if(pressed(1)&&!previousPadButtons[1])cameraMode=1-cameraMode; // B
   if(pressed(9)&&!previousPadButtons[9]&&document.pointerLockElement)document.exitPointerLock?.(); // Menu
   if(pressed(0)&&document.querySelector('#start').style.display!=='none'){
