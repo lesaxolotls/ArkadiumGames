@@ -18,7 +18,7 @@ button{background:#a83232;color:white;border:0;border-radius:6px;padding:10px 13
 <body>
 <div id="hud">
 <div id="brand">⚔ ARKADIUM 3D</div><div id="healthbox">VIE <span id="healthvalue">100</span> / 100<div id="healthtrack"><div id="healthfill"></div></div></div><div id="damageflash"></div><div id="stats" class="panel"><div id="connection">Connexion…</div><div id="count">0 / 50 joueurs</div></div>
-<div id="help" class="panel">ZQSD / WASD : bouger<br>Espace : sauter · Maj : courir · F : attaquer · E : récolter<br>/help : commandes · /admin : panneau admin<br>V : changer de caméra<br>Échap : libérer la souris<br><b>Manette Xbox</b><br>Stick gauche : bouger · Stick droit : caméra<br>A : sauter · B : caméra · X : attaquer<br>Clic stick gauche : courir · Y : récolter<br>Menu : libérer souris · Entrée : discuter</div><div id="crosshair"></div>
+<div id="help" class="panel">ZQSD / WASD : bouger<br>Espace : sauter / monter en vol · Ctrl : descendre<br>Maj : courir · F : attaquer · E : récolter<br>/help : commandes · /admin : panneau admin<br>V : changer de caméra<br>Échap : libérer la souris<br><b>Manette Xbox</b><br>Stick gauche : bouger · Stick droit : caméra<br>A : sauter · B : caméra · X : attaquer<br>Clic stick gauche : courir · Y : récolter<br>Menu : libérer souris · Entrée : discuter</div><div id="crosshair"></div>
 <div id="chat" class="panel"><div id="messages"></div><form id="chatrow"><input id="chatinput" maxlength="240" placeholder="Écrire un message…"><button>Envoyer</button></form></div>
 <div id="accountbar" class="panel" style="display:none"><span id="accountname"></span> <button id="adminbutton" style="display:none">ADMIN</button> <button id="logout">Déconnexion</button></div><div id="inventory" class="panel" style="display:none"><b>🎒 INVENTAIRE</b><br>🪵 Bois : <span id="woodcount">0</span><br>🪨 Pierre : <span id="stonecount">0</span><br>💎 Cristal : <span id="crystalcount">0</span><br><small>Approche-toi et appuie sur E / Y</small></div><div id="start"><div class="panel"><h1>⚔ ARKADIUM 3D</h1><p>Connecte-toi ou crée ton compte pour jouer.</p><div id="authbox"><label>Pseudo<input id="authusername" maxlength="16" value="Lesaxolotls" autocomplete="username"></label><label>Mot de passe<input id="authpassword" type="password" autocomplete="current-password"></label><div id="authbuttons"><button id="loginbutton">Connexion</button><button id="registerbutton">Créer un compte</button></div><div id="authmessage"></div></div><div id="loggedin" style="display:none"><p>Connecté en tant que <b id="loggedname"></b></p><button id="play">JOUER</button></div><small>Prototype multijoueur en développement</small></div></div>
 </div>
@@ -37,7 +37,7 @@ const treeDummy=new THREE.Object3D();const trunks=new THREE.InstancedMesh(new TH
 for(let i=0;i<treePositions.length;i++){const [x,z]=treePositions[i];treeDummy.position.set(x,1,z);treeDummy.updateMatrix();trunks.setMatrixAt(i,treeDummy.matrix);treeDummy.position.set(x,3.8,z);treeDummy.updateMatrix();crowns.setMatrixAt(i,treeDummy.matrix);}
 trunks.instanceMatrix.needsUpdate=true;crowns.instanceMatrix.needsUpdate=true;scene.add(trunks,crowns);
 const bodyGeo=new THREE.CapsuleGeometry(.42,.9,4,8),remote=new Map(),local={x:0,y:0,z:0,vy:0,onGround:true,yaw:0};
-const pickupMeshes=new Map();let inventory={wood:0,stone:0,crystal:0},accountName='',isAdmin=false,gameMode='survival';
+const pickupMeshes=new Map();let inventory={wood:0,stone:0,crystal:0},accountName='',isAdmin=false,gameMode='survival',isFlying=false;
 function showInventory(inv){inventory=inv||inventory;for(const k of ['wood','stone','crystal'])document.querySelector('#'+k+'count').textContent=inventory[k]||0;}
 function addPickup(p){if(pickupMeshes.has(p.id))return;const color=p.type==='wood'?0x9b6538:p.type==='stone'?0x9299a2:0x54e8ff;const geometry=p.type==='wood'?new THREE.BoxGeometry(.8,.35,.35):p.type==='stone'?new THREE.DodecahedronGeometry(.48,0):new THREE.OctahedronGeometry(.5,0);const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color,emissive:p.type==='crystal'?0x123344:0x000000}));mesh.position.set(p.x,.45,p.z);scene.add(mesh);pickupMeshes.set(p.id,{mesh,data:p});}
 function collectNearest(){if(!ws||ws.readyState!==1)return;let nearest=null,dist=3.5;for(const item of pickupMeshes.values()){const d=Math.hypot(item.data.x-local.x,item.data.z-local.z);if(d<dist){dist=d;nearest=item.data;}}if(nearest)ws.send(JSON.stringify({type:'harvest',id:nearest.id}));else say('Aucune ressource a proximite.');}
@@ -58,6 +58,7 @@ else if(d.type==='attack_result'){say(d.hit?'Coup réussi !':'Aucun joueur à po
 else if(d.type==='inventory')showInventory(d.inventory);
 else if(d.type==='teleport'){local.x=d.x;local.y=d.y||0;local.z=d.z;local.vy=0;}
 else if(d.type==='gamemode'){gameMode=d.mode;say('Mode de jeu : '+gameMode);}
+else if(d.type==='fly'){isFlying=!!d.enabled;local.vy=0;}
 else if(d.type==='pickup_removed'){const item=pickupMeshes.get(d.id);if(item){scene.remove(item.mesh);pickupMeshes.delete(d.id);}}
 else if(d.type==='notice')say(d.message);
 else if(d.type==='chat')say(d.name+': '+d.message);else if(d.type==='error')say(d.message);};}
@@ -117,7 +118,7 @@ const keyboardForward=(keys.KeyW||keys.KeyZ?1:0)-(keys.KeyS?1:0),keyboardSide=(k
 const f=keyboardForward-padMoveY,s=keyboardSide+padMoveX;
 yaw-=padLookX*2.4*dt;pitch=Math.max(-1.15,Math.min(.65,pitch+padLookY*1.8*dt));
 const speed=(keys.ShiftLeft||keys.ShiftRight||padSprint)?10:5,sn=Math.sin(yaw),cs=Math.cos(yaw);
-local.x+=(s*cs-f*sn)*speed*dt;local.z+=(s*sn+f*cs)*speed*dt;if((keys.Space||padJump)&&local.onGround){local.vy=8;local.onGround=false;}if(gameMode==='creative'){if(keys.Space)local.y+=8*dt;if(keys.ControlLeft||keys.ControlRight)local.y-=8*dt;local.vy=0;}else{local.vy-=22*dt;local.y+=local.vy*dt;}if(local.y<0){local.y=0;local.vy=0;local.onGround=true;}local.yaw=yaw;
+local.x+=(s*cs-f*sn)*speed*dt;local.z+=(s*sn+f*cs)*speed*dt;if(isFlying){if(keys.Space||padJump)local.y+=10*dt;if(keys.ControlLeft||keys.ControlRight)local.y-=10*dt;local.vy=0;}else if(gameMode==='creative'){if(keys.Space)local.y+=8*dt;if(keys.ControlLeft||keys.ControlRight)local.y-=8*dt;local.vy=0;}else{if((keys.Space||padJump)&&local.onGround){local.vy=8;local.onGround=false;}local.vy-=22*dt;local.y+=local.vy*dt;}if(local.y<0){local.y=0;local.vy=0;local.onGround=true;}local.yaw=yaw;
 localMesh.position.set(local.x,local.y+1,local.z);localMesh.rotation.y=yaw;
 if(cameraMode===0){camera.position.set(local.x-Math.sin(yaw)*7,local.y+3.2,local.z-Math.cos(yaw)*7);camera.lookAt(local.x,local.y+1.3,local.z);}else{camera.position.set(local.x,local.y+1.55,local.z);camera.rotation.order='YXZ';camera.rotation.set(pitch,yaw,0);}
 for(const p of remote.values()){const v=p.mesh.position.clone().project(camera);p.label.style.left=((v.x*.5+.5)*innerWidth)+'px';p.label.style.top=((-v.y*.5+.5)*innerHeight-35)+'px';p.label.style.display=v.z<1?'block':'none';}
