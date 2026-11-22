@@ -221,6 +221,87 @@ async def broadcast(payload, exclude=None):
         players.pop(player_id, None)
 
 
+async def handle_command(raw, player_id, account, ws):
+    parts = raw.strip().split()
+    command, args = parts[0].lower(), parts[1:]
+    admin = account.get("is_admin", False)
+    current = players.get(player_id)
+    if command == "/help":
+        await send_json(ws, {"type": "notice", "message": "Commandes : /help, /me. Admin : /admin, /gamemode, /tp, /heal, /give, /kick."})
+        return
+    if command == "/me":
+        await send_json(ws, {"type": "notice", "message": "Connecté : " + account["username"] + (" (ADMIN)" if admin else " (Joueur)")})
+        return
+    if command not in ("/admin", "/gamemode", "/tp", "/heal", "/give", "/kick"):
+        await send_json(ws, {"type": "notice", "message": "Commande inconnue. Tape /help."})
+        return
+    if not admin:
+        await send_json(ws, {"type": "notice", "message": "Commande réservée aux administrateurs."})
+        return
+    if command == "/admin":
+        msg = "ADMIN : /gamemode creative|survival · /tp pseudo · /heal [pseudo] · /give bois|pierre|cristal quantité · /kick pseudo"
+        await send_json(ws, {"type": "notice", "message": msg})
+    elif command == "/gamemode":
+        if len(args) != 1 or args[0].lower() not in ("creative", "survival"):
+            await send_json(ws, {"type": "notice", "message": "Utilisation : /gamemode creative ou /gamemode survival"})
+            return
+        current["game_mode"] = args[0].lower()
+        await send_json(ws, {"type": "gamemode", "mode": current["game_mode"]})
+        await send_json(ws, {"type": "notice", "message": "Mode : " + current["game_mode"]})
+    elif command == "/tp":
+        target = next((p for p in players.values() if args and p["name"].lower() == args[0].lower()), None)
+        if not target:
+            await send_json(ws, {"type": "notice", "message": "Joueur introuvable. Utilisation : /tp pseudo"})
+            return
+        current["x"], current["y"], current["z"] = target["x"], target["y"], target["z"]
+        await send_json(ws, {"type": "teleport", "x": target["x"], "y": target["y"], "z": target["z"]})
+        await send_json(ws, {"type": "notice", "message": "Téléportation vers " + target["name"]})
+    elif command == "/heal":
+        target = current if not args else next((p for p in players.values() if p["name"].lower() == args[0].lower()), None)
+        if len(args) > 1 or not target:
+            await send_json(ws, {"type": "notice", "message": "Utilisation : /heal [pseudo] — joueur introuvable."})
+            return
+        target["health"] = 100
+        target_ws = sockets.get(target["id"])
+        if target_ws:
+            await send_json(target_ws, {"type": "health", "player_id": target["id"], "health": 100})
+        await send_json(ws, {"type": "notice", "message": "Vie restaurée : " + target["name"]})
+    elif command == "/give":
+        names = {"bois": "wood", "pierre": "stone", "cristal": "crystal"}
+        if len(args) != 2 or args[0].lower() not in names:
+            await send_json(ws, {"type": "notice", "message": "Utilisation : /give bois|pierre|cristal quantité"})
+            return
+        try:
+            amount = int(args[1])
+        except ValueError:
+            amount = 0
+        if amount < 1 or amount > 10000:
+            await send_json(ws, {"type": "notice", "message": "Quantité autorisée : 1 à 10000."})
+            return
+        key = names[args[0].lower()]
+        with db() as conn:
+            row = conn.execute("SELECT inventory FROM accounts WHERE id=?", (account["id"],)).fetchone()
+            inv = json.loads(row["inventory"]) if row else {"wood": 0, "stone": 0, "crystal": 0}
+            inv[key] = int(inv.get(key, 0)) + amount
+            conn.execute("UPDATE accounts SET inventory=? WHERE id=?", (json.dumps(inv), account["id"]))
+            conn.commit()
+        await send_json(ws, {"type": "inventory", "inventory": inv})
+        await send_json(ws, {"type": "notice", "message": str(amount) + " " + args[0].lower() + " ajouté(s)."})
+    elif command == "/kick":
+        if len(args) != 1:
+            await send_json(ws, {"type": "notice", "message": "Utilisation : /kick pseudo"})
+            return
+        target = next((p for p in players.values() if p["name"].lower() == args[0].lower()), None)
+        if not target:
+            await send_json(ws, {"type": "notice", "message": "Joueur introuvable ou hors ligne."})
+            return
+        target_ws = sockets.get(target["id"])
+        if target_ws:
+            await send_json(target_ws, {"type": "notice", "message": "Tu as été expulsé par un administrateur."})
+            await target_ws.close(code=4001, message=b"Admin kick")
+        await send_json(ws, {"type": "notice", "message": target["name"] + " a été expulsé."})
+
+
 async def websocket_handler(request):
     account = account_from_cookie(request)
     if not account:
@@ -317,7 +398,9 @@ async def websocket_handler(request):
 
                 elif kind == "chat":
                     message = str(data.get("message", "")).strip()[:240]
-                    if message:
+                    if message.startswith("/"):
+                        await handle_command(message, player_id, account, ws)
+                    elif message:
                         await broadcast({"type": "chat", "id": player_id, "name": player["name"], "message": message})
             elif msg.type in (WSMsgType.ERROR, WSMsgType.CLOSE):
                 break
