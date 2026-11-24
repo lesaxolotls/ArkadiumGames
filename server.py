@@ -577,6 +577,18 @@ async def websocket_handler(request):
     account = account_from_cookie(request)
     if not account:
         return web.json_response({"error": "Connecte-toi pour jouer."}, status=401)
+    # Un seul WebSocket actif par compte : évite les doublons si le joueur ouvre plusieurs onglets.
+    for old_id, old_player in list(players.items()):
+        if old_player.get("account_id") == account["id"]:
+            old_ws = sockets.pop(old_id, None)
+            players.pop(old_id, None)
+            await broadcast({"type": "leave", "id": old_id})
+            if old_ws and not old_ws.closed:
+                try:
+                    await old_ws.close(code=4002, message=b"New connection for this account")
+                except Exception:
+                    pass
+
     if len(players) >= MAX_PLAYERS:
         return web.json_response({"error": "Le serveur est complet."}, status=503)
 
@@ -584,7 +596,7 @@ async def websocket_handler(request):
     await ws.prepare(request)
     player_id = uuid.uuid4().hex[:8]
     player = {
-        "id": player_id, "account_id": account["id"], "name": account["username"],
+        "id": player_id, "account_id": account["id"], "name": account["username"], "role": account["role"],
         "x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0,
         "health": 100, "last_attack": 0.0, "game_mode": "survival", "flying": False,
         "anticheat_violations": 0, "last_move_at": time.monotonic(), "last_anticheat_notice": 0.0,
