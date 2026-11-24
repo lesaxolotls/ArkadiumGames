@@ -7,7 +7,12 @@ Prototype de jeu de survie 3D jouable dans un navigateur, avec déplacements et 
 - Monde 3D dans le navigateur avec Three.js.
 - Déplacements ZQSD ou WASD, saut et sprint.
 - Caméra à la première ou troisième personne (touche V).
-- Souris pour orienter la caméra.
+- Souris, manette et commandes tactiles pour orienter la caméra et se déplacer sur mobile.
+- Joystick virtuel mobile : déplacement, saut, sprint, attaque, récolte et changement de caméra.
+- Carte procédurale avec graine aléatoire par démarrage du serveur : forêts, ressources et habitations abandonnées partagées entre les joueurs.
+- Mode construction inspiré des jeux de survie : fondations, murs, portes, générateurs, batteries et lampes.
+- Constructions synchronisées en multijoueur et sauvegardées dans SQLite.
+- Électricité simplifiée : un générateur alimente les lampes proches ; une batterie proche du générateur étend le réseau.
 - Joueurs synchronisés en temps réel par WebSocket.
 - Chat textuel et compteur de joueurs.
 - Endpoint de santé : `/health`.
@@ -63,4 +68,4 @@ Le serveur vérifie l'accès à SQLite au démarrage et affiche un message expli
 
 ## État du prototype et limites
 
-Ce dépôt contient une base jouable, pas encore un jeu de survie complet. Les comptes, sauvegardes persistantes, inventaire, fabrication, construction, modération avancée et anti-triche restent à développer. La limite de 50 joueurs est un plafond configuré, pas une capacité validée par un test de charge : les performances dépendront de l'hébergeur. Le navigateur doit pouvoir accéder au CDN Three.js.
+Ce dépôt contient une base jouable, pas encore un jeu de survie complet. Les comptes, inventaires et constructions sont sauvegardés dans SQLite. La carte et les emplacements de ressources sont régénérés au redémarrage du serveur ; tous les joueurs connectés partagent la même graine de monde. Le système électrique est une première simulation simple, pas encore un réseau de câbles ou une consommation de carburant. La limite de 50 joueurs est un plafond configuré, pas une capacité validée par un test de charge : les performances dépendront de l'hébergeur. Le navigateur doit pouvoir accéder au CDN Three.js.
