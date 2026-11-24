@@ -362,6 +362,9 @@ async def register(request):
         return web.json_response({"error": "Requete invalide."}, status=400)
     username = str(data.get("username", "")).strip()
     password = str(data.get("password", ""))
+    ip = client_ip(request)
+    if is_ip_banned(ip):
+        return web.json_response({"error": "Adresse IP bannie."}, status=403)
     if not re.fullmatch(r"[A-Za-z0-9_]{3,16}", username):
         return web.json_response({"error": "Pseudo : 3 a 16 caracteres (lettres, chiffres, _)."}, status=400)
     if len(password) < 8 or len(password) > 128:
@@ -370,8 +373,8 @@ async def register(request):
     try:
         with db() as conn:
             cursor = conn.execute(
-                "INSERT INTO accounts(username, username_key, salt, password_hash, inventory, created_at) VALUES(?,?,?,?,?,?)",
-                (username, username.lower(), salt, digest, json.dumps({"wood": 0, "stone": 0, "crystal": 0}), int(time.time()))
+                "INSERT INTO accounts(username, username_key, salt, password_hash, inventory, created_at, last_ip) VALUES(?,?,?,?,?,?,?)",
+                (username, username.casefold(), salt, digest, json.dumps({"wood": 0, "stone": 0, "crystal": 0}), int(time.time()), ip)
             )
             account_id = cursor.lastrowid
             conn.commit()
@@ -461,14 +464,16 @@ async def handle_command(raw, player_id, account, ws):
     if command == "/me":
         await send_json(ws, {"type": "notice", "message": "Connecté : " + account["username"] + (" (ADMIN)" if admin else " (Joueur)")})
         return
-    if command not in ("/admin", "/fly", "/gamemode", "/tp", "/heal", "/give", "/kick"):
+    if command not in ("/admin", "/adminpanel", "/fly", "/gamemode", "/tp", "/heal", "/give", "/kick"):
         await send_json(ws, {"type": "notice", "message": "Commande inconnue. Tape /help."})
         return
     if not admin:
         await send_json(ws, {"type": "notice", "message": "Commande réservée aux administrateurs."})
         return
-    if command == "/admin":
-        msg = "ADMIN : /fly · /gamemode creative|survival · /tp pseudo · /heal [pseudo] · /give bois|pierre|cristal quantité · /kick pseudo"
+    if command == "/adminpanel":
+        await send_json(ws, {"type": "open_adminpanel"})
+    elif command == "/admin":
+        msg = "ADMIN : /adminpanel · /fly · /gamemode creative|survival · /tp pseudo · /heal [pseudo] · /give bois|pierre|cristal quantité · /kick pseudo"
         await send_json(ws, {"type": "notice", "message": msg})
     elif command == "/fly":
         if args:
@@ -560,7 +565,7 @@ async def websocket_handler(request):
     await send_json(ws, {
         "type": "welcome", "id": player_id,
         "players": [p for p in players.values() if p["id"] != player_id],
-        "max_players": MAX_PLAYERS, "username": account["username"],
+        "max_players": MAX_PLAYERS, "username": account["username"], "role": account["role"],
         "inventory": account["inventory"], "is_admin": account["is_admin"],
         "pickups": list(available_pickups.values()), "world_seed": WORLD_SEED,
         "structures": list(structures.values())
