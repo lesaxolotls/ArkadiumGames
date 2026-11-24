@@ -138,6 +138,10 @@ def init_db():
             expires_at INTEGER NOT NULL,
             FOREIGN KEY(account_id) REFERENCES accounts(id) ON DELETE CASCADE
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS world_structures (
+            id TEXT PRIMARY KEY, type TEXT NOT NULL, x REAL NOT NULL, z REAL NOT NULL,
+            rotation REAL NOT NULL, owner TEXT NOT NULL, created_at INTEGER NOT NULL
+        )""")
         # Compte initial : le mot de passe est stocke uniquement sous forme PBKDF2.
         # Compte initial historique conservé pour ne pas casser les installations existantes.
         username = "Lesaxolotls"
@@ -149,6 +153,11 @@ def init_db():
         conn.execute("UPDATE accounts SET role='player' WHERE role='admin' AND username_key<>?", (ADMIN_USERNAME.casefold(),))
         conn.execute("UPDATE accounts SET role='admin' WHERE username_key=?", (ADMIN_USERNAME.casefold(),))
         conn.commit()
+        for row in conn.execute("SELECT id, type, x, z, rotation, owner FROM world_structures").fetchall():
+            structures[row["id"]] = {
+                "id": row["id"], "type": row["type"], "x": row["x"],
+                "z": row["z"], "rotation": row["rotation"], "owner": row["owner"]
+            }
 
 
 def account_from_cookie(request):
@@ -508,6 +517,12 @@ async def websocket_handler(request):
                         "x": round(bx, 2), "z": round(bz, 2),
                         "rotation": rotation % (math.tau), "owner": account["username"]
                     }
+                    with db() as conn:
+                        conn.execute(
+                            "INSERT INTO world_structures(id, type, x, z, rotation, owner, created_at) VALUES(?,?,?,?,?,?,?)",
+                            (structure["id"], structure["type"], structure["x"], structure["z"], structure["rotation"], structure["owner"], int(time.time()))
+                        )
+                        conn.commit()
                     structures[structure["id"]] = structure
                     await send_json(ws, {"type": "inventory", "inventory": inventory})
                     await broadcast({"type": "build_added", "structure": structure})
