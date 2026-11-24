@@ -286,6 +286,36 @@ async def admin_account_action(request):
             salt, digest = hash_password(password)
             conn.execute("UPDATE accounts SET salt=?,password_hash=? WHERE id=?", (salt, digest, account_id))
             conn.execute("DELETE FROM sessions WHERE account_id=?", (account_id,))
+        elif action in ("heal", "give", "spawn"):
+            online_player = next((p for p in players.values() if p["account_id"] == account_id), None)
+            if not online_player:
+                return web.json_response({"error": "Ce joueur doit être en ligne pour cette action."}, status=400)
+            target_ws = sockets.get(online_player["id"])
+            if action == "heal":
+                online_player["health"] = 100
+            elif action == "give":
+                resource = str(data.get("resource", ""))
+                if resource not in ("wood", "stone", "crystal"):
+                    return web.json_response({"error": "Ressource invalide."}, status=400)
+                try:
+                    amount = int(data.get("amount", 0))
+                except (TypeError, ValueError):
+                    amount = 0
+                if not 1 <= amount <= 10000:
+                    return web.json_response({"error": "Quantité autorisée : 1 à 10000."}, status=400)
+                row = conn.execute("SELECT inventory FROM accounts WHERE id=?", (account_id,)).fetchone()
+                inventory = json.loads(row["inventory"]) if row else {"wood": 0, "stone": 0, "crystal": 0}
+                inventory[resource] = int(inventory.get(resource, 0)) + amount
+                conn.execute("UPDATE accounts SET inventory=? WHERE id=?", (json.dumps(inventory), account_id))
+            conn.commit()
+            if target_ws and not target_ws.closed:
+                if action == "heal":
+                    await target_ws.send_str(json.dumps({"type": "health", "player_id": online_player["id"], "health": 100}))
+                elif action == "give":
+                    await target_ws.send_str(json.dumps({"type": "inventory", "inventory": inventory}))
+                elif action == "spawn":
+                    online_player["x"] = online_player["y"] = online_player["z"] = 0.0
+                    await target_ws.send_str(json.dumps({"type": "teleport", "x": 0, "y": 0, "z": 0}))
         elif action != "kick":
             return web.json_response({"error": "Action inconnue."}, status=400)
         conn.commit()
