@@ -130,6 +130,10 @@ def init_db():
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(accounts)").fetchall()}
         if "role" not in columns:
             conn.execute("ALTER TABLE accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'player'")
+        for column, definition in (("is_active", "INTEGER NOT NULL DEFAULT 1"), ("is_banned", "INTEGER NOT NULL DEFAULT 0"), ("last_ip", "TEXT NOT NULL DEFAULT ''")):
+            if column not in columns:
+                conn.execute("ALTER TABLE accounts ADD COLUMN " + column + " " + definition)
+        conn.execute("CREATE TABLE IF NOT EXISTS ip_bans (ip TEXT PRIMARY KEY, reason TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)")
         conn.execute("UPDATE accounts SET role='player' WHERE role='admin' AND username_key<>?", (ADMIN_USERNAME.casefold(),))
         conn.execute("UPDATE accounts SET role='admin' WHERE username_key=?", (ADMIN_USERNAME.casefold(),))
         conn.execute("""CREATE TABLE IF NOT EXISTS sessions (
@@ -160,6 +164,149 @@ def init_db():
             }
 
 
+
+admin_unlocks = {}
+
+def client_ip(request):
+    return request.remote or ""
+
+def is_ip_banned(ip):
+    if not ip:
+        return False
+    with db() as conn:
+        return conn.execute("SELECT 1 FROM ip_bans WHERE ip=?", (ip,)).fetchone() is not None
+
+def require_admin(request):
+    account = account_from_cookie(request)
+    token = request.cookies.get("arkadium_admin", "")
+    unlock = admin_unlocks.get(token)
+    if not account or not account.get("is_admin") or not unlock:
+        return None
+    account_id, expires = unlock
+    if account_id != account["id"] or expires <= int(time.time()):
+        admin_unlocks.pop(token, None)
+        return None
+    return account
+
+async def admin_page(_request):
+    return web.FileResponse(WEB_DIR / "admin.html")
+
+async def admin_unlock(request):
+    account = account_from_cookie(request)
+    if not account or not account.get("is_admin"):
+        return web.json_response({"error": "Accès administrateur requis."}, status=403)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Requête invalide."}, status=400)
+    with db() as conn:
+        row = conn.execute("SELECT salt,password_hash FROM accounts WHERE id=?", (account["id"],)).fetchone()
+    if not row:
+        return web.json_response({"error": "Compte introuvable."}, status=401)
+    _, candidate = hash_password(str(data.get("password", "")), bytes.fromhex(row["salt"]))
+    if not hmac.compare_digest(candidate, row["password_hash"]):
+        return web.json_response({"error": "Mot de passe incorrect."}, status=401)
+    token = secrets.token_urlsafe(32)
+    admin_unlocks[token] = (account["id"], int(time.time()) + 900)
+    response = web.json_response({"ok": True, "expires_in": 900})
+    response.set_cookie("arkadium_admin", token, max_age=900, httponly=True, secure=request.secure, samesite="Strict", path="/")
+    return response
+
+async def admin_accounts(request):
+    if not require_admin(request):
+        return web.json_response({"error": "Session admin expirée."}, status=403)
+    with db() as conn:
+        rows = conn.execute("SELECT id,username,role,is_active,is_banned,created_at,last_ip FROM accounts ORDER BY created_at DESC").fetchall()
+    online_ids = {p["account_id"] for p in players.values()}
+    return web.json_response({"accounts": [{"id": r["id"], "username": r["username"], "role": r["role"], "active": bool(r["is_active"]), "banned": bool(r["is_banned"]), "online": r["id"] in online_ids, "created_at": r["created_at"], "has_ip": bool(r["last_ip"])} for r in rows]})
+
+async def admin_create_account(request):
+    admin = require_admin(request)
+    if not admin:
+        return web.json_response({"error": "Session admin expirée."}, status=403)
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Requête invalide."}, status=400)
+    username, password, role = str(data.get("username", "")).strip(), str(data.get("password", "")), str(data.get("role", "player"))
+    if not re.fullmatch(r"[A-Za-z0-9_]{3,16}", username) or not 8 <= len(password) <= 128:
+        return web.json_response({"error": "Pseudo 3-16 caractères et mot de passe 8-128 caractères requis."}, status=400)
+    if role not in ("player", "moderator", "admin"):
+        return web.json_response({"error": "Rôle invalide."}, status=400)
+    salt, digest = hash_password(password)
+    try:
+        with db() as conn:
+            conn.execute("INSERT INTO accounts(username,username_key,salt,password_hash,inventory,role,created_at,last_ip) VALUES(?,?,?,?,?,?,?,?)", (username, username.casefold(), salt, digest, json.dumps({"wood":0,"stone":0,"crystal":0}), role, int(time.time()), ""))
+            conn.commit()
+    except sqlite3.IntegrityError:
+        return web.json_response({"error": "Ce pseudo existe déjà."}, status=409)
+    return web.json_response({"ok": True})
+
+async def admin_account_action(request):
+    admin = require_admin(request)
+    if not admin:
+        return web.json_response({"error": "Session admin expirée."}, status=403)
+    try:
+        data = await request.json()
+        account_id, action = int(data.get("id")), str(data.get("action", ""))
+    except Exception:
+        return web.json_response({"error": "Requête invalide."}, status=400)
+    if account_id == admin["id"]:
+        return web.json_response({"error": "Tu ne peux pas modifier ton propre compte ici."}, status=400)
+    with db() as conn:
+        target = conn.execute("SELECT id,username,last_ip FROM accounts WHERE id=?", (account_id,)).fetchone()
+        if not target:
+            return web.json_response({"error": "Compte introuvable."}, status=404)
+        if target["username"].casefold() == ADMIN_USERNAME.casefold():
+            return web.json_response({"error": "Le compte administrateur principal est protégé."}, status=403)
+        if action == "role":
+            role = str(data.get("role", ""))
+            if role not in ("player", "moderator", "admin"):
+                return web.json_response({"error": "Rôle invalide."}, status=400)
+            conn.execute("UPDATE accounts SET role=? WHERE id=?", (role, account_id))
+        elif action == "enable":
+            conn.execute("UPDATE accounts SET is_active=1,is_banned=0 WHERE id=?", (account_id,))
+        elif action == "disable":
+            conn.execute("UPDATE accounts SET is_active=0 WHERE id=?", (account_id,))
+        elif action == "ban":
+            conn.execute("UPDATE accounts SET is_banned=1 WHERE id=?", (account_id,))
+        elif action == "unban":
+            conn.execute("UPDATE accounts SET is_banned=0 WHERE id=?", (account_id,))
+        elif action == "ban_ip":
+            if not target["last_ip"]:
+                return web.json_response({"error": "Aucune IP enregistrée pour ce compte."}, status=400)
+            conn.execute("INSERT OR IGNORE INTO ip_bans(ip,reason,created_at) VALUES(?,?,?)", (target["last_ip"], "Bannissement IP de " + target["username"], int(time.time())))
+        elif action == "unban_ip":
+            if target["last_ip"]:
+                conn.execute("DELETE FROM ip_bans WHERE ip=?", (target["last_ip"],))
+        elif action == "password":
+            password = str(data.get("password", ""))
+            if not 8 <= len(password) <= 128:
+                return web.json_response({"error": "Mot de passe : 8 à 128 caractères."}, status=400)
+            salt, digest = hash_password(password)
+            conn.execute("UPDATE accounts SET salt=?,password_hash=? WHERE id=?", (salt, digest, account_id))
+            conn.execute("DELETE FROM sessions WHERE account_id=?", (account_id,))
+        elif action != "kick":
+            return web.json_response({"error": "Action inconnue."}, status=400)
+        conn.commit()
+    if action in ("kick", "disable", "ban", "password"):
+        for pid, player in list(players.items()):
+            if player["account_id"] == account_id:
+                ws = sockets.get(pid)
+                if ws and not ws.closed:
+                    try:
+                        await ws.send_str(json.dumps({"type": "notice", "message": "Déconnexion par un administrateur."}))
+                        await ws.close(code=4001, message=b"Admin action")
+                    except Exception:
+                        pass
+    return web.json_response({"ok": True})
+
+async def admin_lock(request):
+    admin_unlocks.pop(request.cookies.get("arkadium_admin", ""), None)
+    response = web.json_response({"ok": True})
+    response.del_cookie("arkadium_admin", path="/")
+    return response
+
 def account_from_cookie(request):
     token = request.cookies.get(COOKIE_NAME)
     if not token:
@@ -167,12 +314,12 @@ def account_from_cookie(request):
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     with db() as conn:
         row = conn.execute(
-            """SELECT a.id, a.username, a.inventory, a.role FROM sessions s
+            """SELECT a.id, a.username, a.inventory, a.role, a.is_active, a.is_banned FROM sessions s
                JOIN accounts a ON a.id=s.account_id
                WHERE s.token_hash=? AND s.expires_at>?""",
             (token_hash, int(time.time()))
         ).fetchone()
-    if not row:
+    if not row or not row["is_active"] or row["is_banned"]:
         return None
     try:
         inventory = json.loads(row["inventory"])
@@ -243,15 +390,23 @@ async def login(request):
     username = str(data.get("username", "")).strip()
     password = str(data.get("password", ""))
     with db() as conn:
+        ip = client_ip(request)
         row = conn.execute(
-            "SELECT id, username, salt, password_hash, role FROM accounts WHERE username_key=?",
-            (username.lower(),)
+            "SELECT id, username, salt, password_hash, role, is_active, is_banned FROM accounts WHERE username_key=?",
+            (username.casefold(),)
         ).fetchone()
+    if is_ip_banned(ip):
+        return web.json_response({"error": "Adresse IP bannie."}, status=403)
     if not row:
         return web.json_response({"error": "Identifiants incorrects."}, status=401)
     _, candidate = hash_password(password, bytes.fromhex(row["salt"]))
     if not hmac.compare_digest(candidate, row["password_hash"]):
         return web.json_response({"error": "Identifiants incorrects."}, status=401)
+    if not row["is_active"] or row["is_banned"]:
+        return web.json_response({"error": "Compte désactivé ou banni."}, status=403)
+    with db() as conn:
+        conn.execute("UPDATE accounts SET last_ip=? WHERE id=?", (ip, row["id"]))
+        conn.commit()
     response = web.json_response({"ok": True, "username": row["username"], "is_admin": row["role"] == "admin"})
     set_session(response, row["id"], request)
     return response
@@ -589,6 +744,12 @@ def create_app():
     app.router.add_post("/api/login", login)
     app.router.add_get("/api/me", me)
     app.router.add_post("/api/logout", logout)
+    app.router.add_get("/adminpanel", admin_page)
+    app.router.add_post("/api/admin/unlock", admin_unlock)
+    app.router.add_post("/api/admin/lock", admin_lock)
+    app.router.add_get("/api/admin/accounts", admin_accounts)
+    app.router.add_post("/api/admin/accounts", admin_create_account)
+    app.router.add_post("/api/admin/action", admin_account_action)
     app.router.add_get("/ws", websocket_handler)
     return app
 
