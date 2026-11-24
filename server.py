@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import random
 import secrets
 import sqlite3
 import time
@@ -72,24 +73,32 @@ if not DB_PATH.is_absolute():
 COOKIE_NAME = "arkadium_session"
 PASSWORD_ROUNDS = 310_000
 
-# Ressources fixes partagees par tous les joueurs.
-PICKUP_DEFS = [
-    {"id": "wood-1", "type": "wood", "x": 8, "z": 5},
-    {"id": "wood-2", "type": "wood", "x": -12, "z": 9},
-    {"id": "wood-3", "type": "wood", "x": 18, "z": -14},
-    {"id": "wood-4", "type": "wood", "x": -22, "z": -16},
-    {"id": "stone-1", "type": "stone", "x": 12, "z": 18},
-    {"id": "stone-2", "type": "stone", "x": -18, "z": 22},
-    {"id": "stone-3", "type": "stone", "x": 27, "z": 8},
-    {"id": "stone-4", "type": "stone", "x": -30, "z": -5},
-    {"id": "crystal-1", "type": "crystal", "x": 34, "z": 24},
-    {"id": "crystal-2", "type": "crystal", "x": -36, "z": 18},
-    {"id": "crystal-3", "type": "crystal", "x": 40, "z": -20},
-    {"id": "crystal-4", "type": "crystal", "x": -42, "z": -28},
-]
+# Le monde reçoit une graine aléatoire au démarrage : tous les joueurs voient la même carte.
+WORLD_SEED = random.SystemRandom().randint(1, 2**31 - 1)
+_world_rng = random.Random(WORLD_SEED)
+PICKUP_DEFS = []
+for _index in range(72):
+    _kind = ("wood", "stone", "crystal")[_index % 3]
+    _angle = _world_rng.random() * math.tau
+    _radius = _world_rng.uniform(12, 145)
+    PICKUP_DEFS.append({
+        "id": f"{_kind}-{_index}",
+        "type": _kind,
+        "x": round(math.cos(_angle) * _radius, 2),
+        "z": round(math.sin(_angle) * _radius, 2)
+    })
 RESOURCE_NAMES = {"wood": "bois", "stone": "pierre", "crystal": "cristal"}
+BUILD_COSTS = {
+    "foundation": {"wood": 20, "stone": 5},
+    "wall": {"wood": 12, "stone": 3},
+    "door": {"wood": 15, "stone": 2},
+    "generator": {"wood": 30, "stone": 12, "crystal": 2},
+    "battery": {"wood": 18, "stone": 8, "crystal": 5},
+    "lamp": {"wood": 5, "crystal": 2},
+}
 players = {}
 sockets = {}
+structures = {}
 available_pickups = {item["id"]: dict(item) for item in PICKUP_DEFS}
 
 
@@ -389,7 +398,8 @@ async def websocket_handler(request):
         "players": [p for p in players.values() if p["id"] != player_id],
         "max_players": MAX_PLAYERS, "username": account["username"],
         "inventory": account["inventory"], "is_admin": account["is_admin"],
-        "pickups": list(available_pickups.values())
+        "pickups": list(available_pickups.values()), "world_seed": WORLD_SEED,
+        "structures": list(structures.values())
     })
     await broadcast({"type": "join", "player": player}, exclude=player_id)
 
@@ -466,6 +476,41 @@ async def websocket_handler(request):
                     await send_json(ws, {"type": "notice", "message": "Ressource recuperee : " + RESOURCE_NAMES[item_type]})
                     await broadcast({"type": "pickup_removed", "id": pickup_id})
 
+                elif kind == "build":
+                    build_type = str(data.get("build_type", ""))
+                    if build_type not in BUILD_COSTS:
+                        await send_json(ws, {"type": "error", "message": "Construction inconnue."})
+                        continue
+                    current = players.get(player_id)
+                    try:
+                        bx, bz = float(data.get("x")), float(data.get("z"))
+                        rotation = float(data.get("rotation", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    if not all(math.isfinite(v) for v in (bx, bz, rotation)):
+                        continue
+                    if math.hypot(bx - current["x"], bz - current["z"]) > 8 or abs(bx) > 180 or abs(bz) > 180:
+                        await send_json(ws, {"type": "error", "message": "Place la construction plus près de toi."})
+                        continue
+                    cost = BUILD_COSTS[build_type]
+                    with db() as conn:
+                        row = conn.execute("SELECT inventory FROM accounts WHERE id=?", (account["id"],)).fetchone()
+                        inventory = json.loads(row["inventory"]) if row else {"wood": 0, "stone": 0, "crystal": 0}
+                        if any(int(inventory.get(k, 0)) < amount for k, amount in cost.items()):
+                            await send_json(ws, {"type": "error", "message": "Ressources insuffisantes. Coût : " + ", ".join(f"{v} {RESOURCE_NAMES.get(k, k)}" for k, v in cost.items())})
+                            continue
+                        for key, amount in cost.items():
+                            inventory[key] = int(inventory.get(key, 0)) - amount
+                        conn.execute("UPDATE accounts SET inventory=? WHERE id=?", (json.dumps(inventory), account["id"]))
+                        conn.commit()
+                    structure = {
+                        "id": uuid.uuid4().hex[:12], "type": build_type,
+                        "x": round(bx, 2), "z": round(bz, 2),
+                        "rotation": rotation % (math.tau), "owner": account["username"]
+                    }
+                    structures[structure["id"]] = structure
+                    await send_json(ws, {"type": "inventory", "inventory": inventory})
+                    await broadcast({"type": "build_added", "structure": structure})
                 elif kind == "attack":
                     now = time.monotonic()
                     attacker = players.get(player_id)
