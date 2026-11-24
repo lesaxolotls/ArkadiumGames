@@ -289,7 +289,7 @@ async def admin_account_action(request):
         elif action != "kick":
             return web.json_response({"error": "Action inconnue."}, status=400)
         conn.commit()
-    if action in ("kick", "disable", "ban", "password"):
+    if action in ("kick", "disable", "ban", "ban_ip", "password"):
         for pid, player in list(players.items()):
             if player["account_id"] == account_id:
                 ws = sockets.get(pid)
