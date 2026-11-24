@@ -31,6 +31,9 @@ button{background:#a83232;color:white;border:0;border-radius:6px;padding:10px 13
 #mobile-actions button:active{background:#d04444}
 #mobile-camera-hint{position:absolute;right:12px;bottom:154px;color:#fff9;font-size:10px;text-shadow:0 1px 3px #000}
 @media(pointer:coarse){#mobile-controls{display:block}#crosshair{opacity:.45}}
+#taboverlay{display:none;position:fixed;z-index:20;top:12%;left:50%;transform:translateX(-50%);width:min(520px,92vw);max-height:65vh;overflow:auto;background:#101820ed;border:1px solid #a83232;border-radius:12px;padding:14px;box-shadow:0 12px 40px #0009;pointer-events:none}
+#taboverlay h3{margin:0 0 10px;color:#ff7777;text-align:center}#tabplayers{display:grid;gap:5px}#tabplayers div{display:flex;justify-content:space-between;gap:12px;padding:7px 9px;background:#ffffff0b;border-radius:5px}#tabplayers small{color:#aebbc7}
+
 
 </style></head>
 <body>
@@ -46,6 +49,7 @@ button{background:#a83232;color:white;border:0;border-radius:6px;padding:10px 13
 <div id="mobile-actions"><button id="mobile-jump">SAUT</button><button id="mobile-sprint">COURIR</button><button id="mobile-attack">ATTAQUE</button><button id="mobile-harvest">RÉCOLTER</button><button id="mobile-camera">CAMÉRA</button><button id="mobile-build">BÂTIR</button></div></div>
 <div id="start"><div class="panel"><h1>⚔ ARKADIUM 3D</h1><p>Connecte-toi ou crée ton compte pour jouer.</p><div id="authbox"><label>Pseudo<input id="authusername" maxlength="16" value="Lesaxolotls" autocomplete="username"></label><label>Mot de passe<input id="authpassword" type="password" autocomplete="current-password"></label><div id="authbuttons"><button id="loginbutton">Connexion</button><button id="registerbutton">Créer un compte</button></div><div id="authmessage"></div></div><div id="loggedin" style="display:none"><p>Connecté en tant que <b id="loggedname"></b></p><button id="play">JOUER</button></div><small>Prototype multijoueur en développement</small></div></div>
 </div>
+<div id="taboverlay"><h3>⚔ ARKADIUM — JOUEURS CONNECTÉS</h3><div id="tabplayers"></div></div>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js';
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x87b9d8);scene.fog=new THREE.Fog(0x87b9d8,45,180);
@@ -76,7 +80,7 @@ function buildWorld(seed){
  }
 }
 const bodyGeo=new THREE.CapsuleGeometry(.42,.9,4,8),remote=new Map(),local={x:0,y:0,z:0,vy:0,onGround:true,yaw:0};
-const pickupMeshes=new Map();let inventory={wood:0,stone:0,crystal:0},accountName='',isAdmin=false,gameMode='survival',isFlying=false;
+const pickupMeshes=new Map();let inventory={wood:0,stone:0,crystal:0},accountName='',accountRole='player',isAdmin=false,gameMode='survival',isFlying=false;
 function showInventory(inv){inventory=inv||inventory;for(const k of ['wood','stone','crystal'])document.querySelector('#'+k+'count').textContent=inventory[k]||0;}
 function addPickup(p){if(pickupMeshes.has(p.id))return;const color=p.type==='wood'?0x9b6538:p.type==='stone'?0x9299a2:0x54e8ff;const geometry=p.type==='wood'?new THREE.BoxGeometry(.8,.35,.35):p.type==='stone'?new THREE.DodecahedronGeometry(.48,0):new THREE.OctahedronGeometry(.5,0);const mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color,emissive:p.type==='crystal'?0x123344:0x000000}));mesh.position.set(p.x,.45,p.z);scene.add(mesh);pickupMeshes.set(p.id,{mesh,data:p});}
 function collectNearest(){if(!ws||ws.readyState!==1)return;let nearest=null,dist=3.5;for(const item of pickupMeshes.values()){const d=Math.hypot(item.data.x-local.x,item.data.z-local.z);if(d<dist){dist=d;nearest=item.data;}}if(nearest)ws.send(JSON.stringify({type:'harvest',id:nearest.id}));else say('Aucune ressource a proximite.');}
@@ -125,15 +129,17 @@ renderer.domElement.addEventListener('pointerup',e=>{if(touchLookPointer===e.poi
 renderer.domElement.addEventListener('pointercancel',()=>touchLookPointer=null);
 const localMesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:0x3b82f6}));localMesh.position.y=1;scene.add(localMesh);
 let myId=null,ws=null,yaw=0,pitch=-.18,cameraMode=0,locked=false,lastSend=0,health=100,lastAttack=0;const keys={};let previousPadButtons=[];let padConnected=false;let padMoveX=0,padMoveY=0,padLookX=0,padLookY=0,padJump=false,padSprint=false,padAttack=false;
-function makePlayer(p){const mesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:p.color||0xff5555}));mesh.position.set(p.x||0,1,p.z||0);scene.add(mesh);const label=document.createElement('div');label.style.cssText='position:fixed;color:white;font-size:12px;text-shadow:0 1px 4px black;pointer-events:none;transform:translate(-50%,-50%)';label.textContent=p.name||'Joueur';document.body.appendChild(label);return{mesh,label,name:p.name||'Joueur'};}
+function makePlayer(p){const mesh=new THREE.Mesh(bodyGeo,new THREE.MeshStandardMaterial({color:p.color||0xff5555}));mesh.position.set(p.x||0,1,p.z||0);scene.add(mesh);const label=document.createElement('div');label.style.cssText='position:fixed;color:white;font-size:12px;text-shadow:0 1px 4px black;pointer-events:none;transform:translate(-50%,-50%)';label.textContent=p.name||'Joueur';document.body.appendChild(label);return{mesh,label,name:p.name||'Joueur',role:p.role||'player'};}
 function say(s){const e=document.createElement('div');e.textContent=s;const box=document.querySelector('#messages');box.append(e);box.scrollTop=box.scrollHeight;}
-function count(){document.querySelector('#count').textContent=(remote.size+(myId?1:0))+' / '+(ws?.maxPlayers||50)+' joueurs';}
+function updateTab(){const list=[];if(myId)list.push({name:accountName,role:accountRole});for(const p of remote.values())list.push({name:p.name,role:p.role||'player'});list.sort((a,b)=>a.name.localeCompare(b.name));document.querySelector('#tabplayers').innerHTML=list.map(p=>'<div><span>'+p.name.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</span><small>'+({admin:'ADMIN',moderator:'MODÉRATEUR',player:'JOUEUR'}[p.role]||p.role.toUpperCase())+'</small></div>').join('')||'<small>Aucun joueur connecté</small>';}
+function count(){document.querySelector('#count').textContent=(remote.size+(myId?1:0))+' / '+(ws?.maxPlayers||50)+' joueurs';updateTab();}
 function connect(){const scheme=location.protocol==='https:'?'wss':'ws';ws=new WebSocket(scheme+'://'+location.host+'/ws');ws.onopen=()=>document.querySelector('#connection').textContent='Connecté';ws.onclose=()=>document.querySelector('#connection').textContent='Déconnecté';ws.onerror=()=>document.querySelector('#connection').textContent='Erreur réseau';
-ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='welcome'){myId=d.id;ws.maxPlayers=d.max_players;accountName=d.username;isAdmin=!!d.is_admin;updateAdminUI();showInventory(d.inventory);buildWorld(d.world_seed);for(const p of d.players)if(p.id!==myId)remote.set(p.id,makePlayer(p));for(const p of d.pickups||[])addPickup(p);for(const item of d.structures||[])addStructure(item);document.querySelector('#buildtoggle').style.display='block';count();}
+ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.type==='welcome'){myId=d.id;ws.maxPlayers=d.max_players;accountName=d.username;accountRole=d.role||'player';isAdmin=!!d.is_admin;updateAdminUI();showInventory(d.inventory);buildWorld(d.world_seed);for(const p of d.players)if(p.id!==myId)remote.set(p.id,makePlayer(p));for(const p of d.pickups||[])addPickup(p);for(const item of d.structures||[])addStructure(item);document.querySelector('#buildtoggle').style.display='block';count();}
 else if(d.type==='join'){if(!remote.has(d.player.id))remote.set(d.player.id,makePlayer(d.player));count();}
 else if(d.type==='leave'){const p=remote.get(d.id);if(p){scene.remove(p.mesh);p.label.remove();remote.delete(d.id);}count();}
 else if(d.type==='move'){const p=remote.get(d.player.id);if(p){p.mesh.position.set(d.player.x,d.player.y+1,d.player.z);p.mesh.rotation.y=d.player.yaw;}}
-else if(d.type==='rename'){const p=remote.get(d.id);if(p){p.name=d.name;p.label.textContent=d.name;}}
+else if(d.type==='rename'){const p=remote.get(d.id);if(p){p.name=d.name;p.label.textContent=d.name;updateTab();}}
+else if(d.type==='open_adminpanel'){location.href='/adminpanel';}
 else if(d.type==='health'){if(d.player_id===myId){const before=health;health=d.health;document.querySelector('#healthvalue').textContent=health;document.querySelector('#healthfill').style.width=health+'%';document.querySelector('#healthfill').style.background=health<=30?'#e33':'#39c76a';if(health<before){const flash=document.querySelector('#damageflash');flash.style.opacity='.28';setTimeout(()=>flash.style.opacity='0',130);const gp=Array.from(navigator.getGamepads?.()||[]).find(p=>p?.connected);const actuator=gp?.vibrationActuator;if(actuator?.playEffect){try{const rumble=actuator.playEffect('dual-rumble',{duration:180,strongMagnitude:.65,weakMagnitude:.35});rumble?.catch?.(()=>{});}catch(_){}}}}}
 else if(d.type==='respawn'){if(d.player_id===myId){local.x=0;local.y=0;local.z=0;local.vy=0;health=100;document.querySelector('#healthvalue').textContent='100';document.querySelector('#healthfill').style.width='100%';say('Tu as été réapparu.');}else{const p=remote.get(d.player_id);if(p)p.mesh.position.set(0,1,0);}}
 else if(d.type==='attack_result'){say(d.hit?'Coup réussi !':'Aucun joueur à portée.');}
@@ -149,8 +155,8 @@ document.querySelector('#play').onclick=()=>{document.querySelector('#start').st
 renderer.domElement.onclick=()=>{if(buildMode){placeBuild();return;}if(myId&&matchMedia('(pointer:fine)').matches)renderer.domElement.requestPointerLock?.();};
 document.addEventListener('pointerlockchange',()=>locked=document.pointerLockElement===renderer.domElement);
 document.addEventListener('mousemove',e=>{if(locked){yaw-=e.movementX*.002;pitch=Math.max(-1.15,Math.min(.65,pitch-e.movementY*.002));}});
-document.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='KeyE')collectNearest();if(e.code==='KeyF')attack();if(e.code==='KeyV')cameraMode=1-cameraMode;if(e.code==='KeyB')setBuildMode(!buildMode);if(e.code==='KeyR'&&buildMode)placeBuild();if(e.code==='Enter'&&document.activeElement!==document.querySelector('#chatinput')){e.preventDefault();document.querySelector('#chatinput').focus();}});
-document.addEventListener('keyup',e=>keys[e.code]=false);
+document.addEventListener('keydown',e=>{if(e.code==='Tab'&&document.activeElement!==document.querySelector('#chatinput')){e.preventDefault();document.querySelector('#taboverlay').style.display='block';updateTab();return;}keys[e.code]=true;if(e.code==='KeyE')collectNearest();if(e.code==='KeyF')attack();if(e.code==='KeyV')cameraMode=1-cameraMode;if(e.code==='KeyB')setBuildMode(!buildMode);if(e.code==='KeyR'&&buildMode)placeBuild();if(e.code==='Enter'&&document.activeElement!==document.querySelector('#chatinput')){e.preventDefault();document.querySelector('#chatinput').focus();}});
+document.addEventListener('keyup',e=>{keys[e.code]=false;if(e.code==='Tab')document.querySelector('#taboverlay').style.display='none';});
 addEventListener('gamepadconnected',e=>{padConnected=true;document.querySelector('#connection').textContent='Manette connectée';say('Manette détectée : '+(e.gamepad.id||'Xbox'));});
 addEventListener('gamepaddisconnected',()=>{padConnected=false;padMoveX=padMoveY=padLookX=padLookY=0;padJump=padSprint=false;say('Manette déconnectée');});
 function attack(){const now=performance.now();if(!myId||ws?.readyState!==1||now-lastAttack<500)return;lastAttack=now;ws.send(JSON.stringify({type:'attack'}));}
@@ -190,10 +196,10 @@ async function authRequest(path){
 }
 document.querySelector('#loginbutton').onclick=()=>authRequest('/api/login');
 document.querySelector('#registerbutton').onclick=()=>authRequest('/api/register');
-document.querySelector('#adminbutton').onclick=()=>{if(ws?.readyState===1)ws.send(JSON.stringify({type:'chat',message:'/admin'}));else say('Connecte-toi au jeu pour ouvrir le panneau admin.');};
+document.querySelector('#adminbutton').onclick=()=>{location.href='/adminpanel';};
 function updateAdminUI(){document.querySelector('#adminbutton').style.display=isAdmin?'inline-block':'none';}
 document.querySelector('#logout').onclick=async()=>{await fetch('/api/logout',{method:'POST',credentials:'same-origin'});location.reload();};
-(async()=>{try{const r=await fetch('/api/me',{credentials:'same-origin'});if(r.ok){const d=await r.json();accountName=d.username;isAdmin=!!d.is_admin;updateAdminUI();showInventory(d.inventory);document.querySelector('#authbox').style.display='none';document.querySelector('#loggedin').style.display='block';document.querySelector('#loggedname').textContent=accountName;document.querySelector('#accountbar').style.display='block';document.querySelector('#accountname').textContent=accountName;}}catch(_){}})();
+(async()=>{try{const r=await fetch('/api/me',{credentials:'same-origin'});if(r.ok){const d=await r.json();accountName=d.username;accountRole=d.role||'player';isAdmin=!!d.is_admin;updateAdminUI();showInventory(d.inventory);document.querySelector('#authbox').style.display='none';document.querySelector('#loggedin').style.display='block';document.querySelector('#loggedname').textContent=accountName;document.querySelector('#accountbar').style.display='block';document.querySelector('#accountname').textContent=accountName;}}catch(_){}})();
 
 document.querySelector('#chatrow').onsubmit=e=>{e.preventDefault();const i=document.querySelector('#chatinput'),m=i.value.trim();if(m&&ws?.readyState===1)ws.send(JSON.stringify({type:'chat',message:m}));i.value='';i.blur();};
 function animate(t){requestAnimationFrame(animate);const dt=Math.min(.05,(t-(animate.last||t))/1000);animate.last=t;readGamepad();
